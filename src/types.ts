@@ -11,3 +11,10 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
 }
+
+export interface UploadFeedback {
+  type: 'nominal' | 'teams';
+  recognized: string[];
+  ignored: string[];
+  missing: string[];
+}
