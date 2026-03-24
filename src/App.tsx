@@ -25,10 +25,16 @@ import {
   Search,
   UserCheck,
   Filter,
-  ClipboardList
+  ClipboardList,
+  Baby,
+  Wallet,
+  User,
+  X,
+  Calendar,
+  Map
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { SIAPSData, Message, UploadFeedback } from './types';
+import { SIAPSData, Message } from './types';
 import { cn } from './lib/utils';
 import { CheckCircle2, Info, XCircle } from 'lucide-react';
 
@@ -37,7 +43,7 @@ const SYSTEM_INSTRUCTION = `Você é um Consultor Especialista em Gestão da Ate
 Seu objetivo é analisar os dados do SIAPS (vínculo e acompanhamento) e fornecer orientações práticas baseadas na metodologia oficial:
 
 1. **Metodologia de Cálculo (CVAT)**:
-   - **Dimensão Cadastro (30%)**: Valoriza a completude. Fator 0.75 para cadastro individual (MICI) e 1.5 para cadastro completo (MICI + Domiciliar/Territorial - MICDT). Cadastros devem estar atualizados nos últimos 24 meses.
+   - **Dimensão Cadastro (30%)**: Valoriza a completude. Fator 0.75 para cadastro individual (MICI) e 1.5 para cadastro completo (MICI + Domiciliar/Territorial - MICDT). O 'Total Cadastro' é a soma de MICI e MICDT. Cadastros devem estar atualizados nos últimos 24 meses.
    - **Dimensão Acompanhamento (70%)**: Foca na continuidade do cuidado (mais de um contato em 12 meses, sendo pelo menos um 'prática de cuidado'). Pesos de vulnerabilidade: Idoso/Criança (1.2), BPC/PBF (1.3), Ambos (2.5).
    - **Satisfação do Usuário**: Pontuação extra (0.15 a 0.30) para equipes com avaliações no app 'Meu SUS Digital'.
 
@@ -54,19 +60,47 @@ Seu objetivo é analisar os dados do SIAPS (vínculo e acompanhamento) e fornece
 
 Use uma linguagem acolhedora, técnica e motivadora. Explique que o cadastro territorializa e identifica, enquanto o acompanhamento consolida a continuidade do cuidado.`;
 
-const getClassificationRank = (classification: string) => {
+const getLimiteNormativo = (porte: number, teamName: string) => {
+  const name = teamName.toUpperCase();
+  const isEAP30 = name.includes('EAP 30') || name.includes('EAP30');
+  const isEAP20 = name.includes('EAP 20') || name.includes('EAP20');
+  const isEAP = name.includes('EAP') && !isEAP30 && !isEAP20;
+  
+  if (porte === 1) {
+    if (isEAP20) return 1000;
+    if (isEAP30 || isEAP) return 1500;
+    return 2000;
+  }
+  if (porte === 2) {
+    if (isEAP20) return 1250;
+    if (isEAP30 || isEAP) return 1875;
+    return 2500;
+  }
+  if (porte === 3) {
+    if (isEAP20) return 1375;
+    if (isEAP30 || isEAP) return 2063;
+    return 2750;
+  }
+  if (isEAP20) return 1500;
+  if (isEAP30 || isEAP) return 2250;
+  return 3000;
+};
+
+const getClassificationRank = (classification: string | undefined) => {
+  if (!classification) return 0;
   const c = classification.toUpperCase();
-  if (c.includes('ÓTIMO')) return 4;
-  if (c.includes('BOM')) return 3;
+  if (c.includes('ÓTIMO') || c.includes('ÓTIMA')) return 4;
+  if (c.includes('BOM') || c.includes('BOA')) return 3;
   if (c.includes('SUFICIENTE')) return 2;
   if (c.includes('REGULAR')) return 1;
   return 0;
 };
 
-const getClassificationStyle = (classification: string) => {
+const getClassificationStyle = (classification: string | undefined) => {
+  if (!classification) return { badge: 'bg-slate-100 text-slate-700', status: 'bg-white' };
   const c = classification.toUpperCase();
-  if (c.includes('ÓTIMO')) return { badge: 'badge-otimo', status: 'status-otimo' };
-  if (c.includes('BOM')) return { badge: 'badge-bom', status: 'status-bom' };
+  if (c.includes('ÓTIMO') || c.includes('ÓTIMA')) return { badge: 'badge-otimo', status: 'status-otimo' };
+  if (c.includes('BOM') || c.includes('BOA')) return { badge: 'badge-bom', status: 'status-bom' };
   if (c.includes('REGULAR')) return { badge: 'badge-regular', status: 'status-regular' };
   if (c.includes('SUFICIENTE')) return { badge: 'badge-suficiente', status: 'status-suficiente' };
   return { badge: 'bg-slate-100 text-slate-700', status: 'bg-white' };
@@ -74,20 +108,20 @@ const getClassificationStyle = (classification: string) => {
 
 export default function App() {
   const [data, setData] = useState<SIAPSData[]>([]);
-  const [nominalData, setNominalData] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'teams' | 'nominal'>('teams');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedTeam, setSelectedTeam] = useState<string>('');
+  const [selectedMonth, setSelectedMonth] = useState<string>('Todos');
+  const [selectedYear, setSelectedYear] = useState<string>('Todos');
   const [swotAnalysis, setSwotAnalysis] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [ineFilter, setIneFilter] = useState('');
-  const [vulnerabilityFilters, setVulnerabilityFilters] = useState<string[]>([]);
-  const [uploadFeedback, setUploadFeedback] = useState<UploadFeedback | null>(null);
+  const [sheetUrl, setSheetUrl] = useState('');
+  const [isLinkingSheet, setIsLinkingSheet] = useState(false);
+  const [municipalityPorte, setMunicipalityPorte] = useState<number>(2);
   
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -97,6 +131,113 @@ export default function App() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const fetchFromGoogleSheets = async () => {
+    if (!sheetUrl) return;
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      let fetchUrl = sheetUrl.trim();
+      
+      if (fetchUrl.includes('docs.google.com/spreadsheets')) {
+        if (fetchUrl.includes('/d/e/')) {
+          // Link de "Publicar na Web"
+          fetchUrl = fetchUrl.replace('/pubhtml', '/pub');
+          if (!fetchUrl.includes('output=csv')) {
+            fetchUrl += (fetchUrl.includes('?') ? '&' : '?') + 'output=csv';
+          }
+        } else {
+          // Link padrão de edição/visualização
+          const match = fetchUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+          if (match && match[1]) {
+            fetchUrl = `https://docs.google.com/spreadsheets/d/${match[1]}/export?format=csv`;
+          }
+        }
+      }
+
+      const response = await fetch(fetchUrl);
+      if (!response.ok) throw new Error('Não foi possível acessar a planilha. Verifique se ela está "Publicada na Web" como CSV.');
+      
+      const csvText = await response.text();
+      
+      Papa.parse(csvText, {
+        header: true,
+        skipEmptyLines: 'greedy',
+        transformHeader: (header) => (header || '').trim().toUpperCase().replace(/\s+/g, ' '),
+        complete: (results) => {
+          const rawData = results.data as any[];
+          if (!rawData || rawData.length === 0) {
+            setError('A planilha parece estar vazia.');
+            setLoading(false);
+            return;
+          }
+
+          const headers = Object.keys(rawData[0]);
+          const hasEquipe = headers.includes('NOME DA EQUIPE') || headers.includes('EQUIPE');
+          const hasResultado = headers.includes('RESULTADO (CVAT)');
+
+          if (hasEquipe && hasResultado) {
+            const parsedData = rawData.map((row: any) => {
+              const rawResult = row['RESULTADO (CVAT)'] || '0';
+              const resultValue = typeof rawResult === 'string' 
+                ? parseFloat(rawResult.replace(',', '.')) 
+                : parseFloat(rawResult);
+              
+              const findValue = (term: string) => {
+                const key = Object.keys(row).find(k => k.includes(term));
+                const val = key ? parseFloat(String(row[key] || '0').replace(',', '.')) : 0;
+                return isNaN(val) ? 0 : val;
+              };
+
+              const mici = findValue('MICI');
+              const micdt = findValue('MICDT');
+              const teamName = (row['NOME DA EQUIPE'] || row['EQUIPE'] || '').trim();
+              
+              return {
+                ...row,
+                'Resultado (CVAT)': isNaN(resultValue) ? 0 : resultValue,
+                'NOME DA EQUIPE': teamName,
+                'Classificação (CVAT)': row['CLASSIFICAÇÃO (CVAT)'] || row['CLASSIFICAÇÃO'] || 'N/A',
+                'Pessoas Acompanhadas': row['PESSOAS ACOMPANHADAS'] || '0',
+                'PARÂMETRO POPULACIONAL': row['PARÂMETRO POPULACIONAL'] || '0',
+                'Limite Normativo': getLimiteNormativo(municipalityPorte, teamName),
+                'MICI': mici,
+                'MICDT': micdt,
+                'Total Cadastro': mici + micdt,
+                'Mês': row['MÊS'] || row['MES'] || 'N/A',
+                'Ano': row['ANO'] || 'N/A'
+              };
+            }).filter(item => item['NOME DA EQUIPE'] !== '' && item['NOME DA EQUIPE'] !== 'Equipe Sem Nome');
+
+            if (parsedData.length === 0) {
+              setError('Nenhuma equipe válida encontrada na planilha.');
+              setLoading(false);
+              return;
+            }
+
+            const sortedData = parsedData.sort((a, b) => {
+              const rankA = getClassificationRank(a['Classificação (CVAT)']);
+              const rankB = getClassificationRank(b['Classificação (CVAT)']);
+              if (rankA !== rankB) return rankB - rankA;
+              return b['Resultado (CVAT)'] - a['Resultado (CVAT)'];
+            });
+
+            setData(sortedData as SIAPSData[]);
+            setSelectedTeam(sortedData[0]['NOME DA EQUIPE']);
+            setIsLinkingSheet(false);
+          } else {
+            setError('A planilha não possui as colunas obrigatórias (Equipe e Resultado CVAT).');
+          }
+          setLoading(false);
+        }
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao carregar planilha.');
+      setLoading(false);
+    }
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -108,7 +249,7 @@ export default function App() {
     Papa.parse(file, {
       header: true,
       skipEmptyLines: 'greedy',
-      transformHeader: (header) => header.trim().toUpperCase().replace(/\s+/g, ' '),
+      transformHeader: (header) => (header || '').trim().toUpperCase().replace(/\s+/g, ' '),
       complete: (results) => {
         try {
           const rawData = results.data as any[];
@@ -117,98 +258,42 @@ export default function App() {
             throw new Error('O arquivo está vazio ou não pôde ser lido.');
           }
 
-          // Check for required columns using normalized (uppercase) names
           const headers = Object.keys(rawData[0]);
-          const hasCPF = headers.includes('CPF');
           const hasEquipe = headers.includes('NOME DA EQUIPE') || headers.includes('EQUIPE');
           const hasResultado = headers.includes('RESULTADO (CVAT)');
 
-          if (hasCPF) {
-            const nominalRequired = ['CPF'];
-            const nominalOptional = [
-              'NOME', 'NOME DO CIDADÃO', 
-              'EQUIPE', 'NOME DA EQUIPE', 
-              'INE', 'IDENTIFICADOR NACIONAL DE EQUIPE', 
-              'STATUS', 'ACOMPANHAMENTO', 
-              'VULNERABILIDADE', 'IDADE', 'BPC', 'PBF', 'BOLSA FAMÍLIA', 'GESTANTE'
-            ];
-            
-            const recognized = headers.filter(h => nominalRequired.includes(h) || nominalOptional.includes(h));
-            const ignored = headers.filter(h => !recognized.includes(h));
-            const missing = nominalRequired.filter(h => !headers.includes(h));
-
-            setUploadFeedback({
-              type: 'nominal',
-              recognized,
-              ignored,
-              missing
-            });
-
-            const parsedNominal = rawData.map((row: any) => {
-              const cpf = row['CPF'] || 'N/A';
-              const nome = row['NOME'] || row['NOME DO CIDADÃO'] || 'Cidadão Sem Nome';
-              const equipe = row['EQUIPE'] || row['NOME DA EQUIPE'] || 'Não Informada';
-              const ine = row['INE'] || row['IDENTIFICADOR NACIONAL DE EQUIPE'] || 'Não Informado';
-              const status = row['STATUS'] || row['ACOMPANHAMENTO'] || 'Pendente';
-              
-              let vulnerabilidade = row['VULNERABILIDADE'] || '';
-              const idadeStr = row['IDADE'] || '-1';
-              const idade = parseInt(idadeStr);
-              
-              const isBPC = String(row['BPC'] || '').toLowerCase().startsWith('s');
-              const isPBF = String(row['PBF'] || row['BOLSA FAMÍLIA'] || '').toLowerCase().startsWith('s');
-              const isGestante = String(row['GESTANTE'] || '').toLowerCase().startsWith('s');
-
-              const vulnerabilities = [];
-              if (vulnerabilidade) vulnerabilities.push(vulnerabilidade);
-              if (idade >= 60) vulnerabilities.push('Idoso');
-              if (idade >= 0 && idade <= 12) vulnerabilities.push('Criança');
-              if (isBPC) vulnerabilities.push('BPC');
-              if (isPBF) vulnerabilities.push('PBF');
-              if (isGestante) vulnerabilities.push('Gestante');
-
-              return {
-                cpf,
-                nome,
-                equipe,
-                ine,
-                status,
-                vulnerabilidade: vulnerabilities.length > 0 ? vulnerabilities.join(', ') : 'Não Identificada',
-                isPriority: vulnerabilities.length > 0
-              };
-            });
-            setNominalData(parsedNominal);
-            setActiveTab('nominal');
-          } else if (hasEquipe && hasResultado) {
-            const teamsRequired = ['RESULTADO (CVAT)'];
-            const teamsOptional = ['NOME DA EQUIPE', 'EQUIPE', 'CLASSIFICAÇÃO (CVAT)', 'CLASSIFICAÇÃO', 'PESSOAS ACOMPANHADAS', 'PARÂMETRO POPULACIONAL'];
-            
-            const recognized = headers.filter(h => teamsRequired.includes(h) || teamsOptional.includes(h));
-            const ignored = headers.filter(h => !recognized.includes(h));
-            const missing = teamsRequired.filter(h => !headers.includes(h));
-
-            setUploadFeedback({
-              type: 'teams',
-              recognized,
-              ignored,
-              missing
-            });
-
+          if (hasEquipe && hasResultado) {
             const parsedData = rawData.map((row: any) => {
               const rawResult = row['RESULTADO (CVAT)'] || '0';
               const resultValue = typeof rawResult === 'string' 
                 ? parseFloat(rawResult.replace(',', '.')) 
                 : parseFloat(rawResult);
               
+              const findValue = (term: string) => {
+                const key = Object.keys(row).find(k => k.includes(term));
+                const val = key ? parseFloat(String(row[key] || '0').replace(',', '.')) : 0;
+                return isNaN(val) ? 0 : val;
+              };
+
+              const mici = findValue('MICI');
+              const micdt = findValue('MICDT');
+              const teamName = (row['NOME DA EQUIPE'] || row['EQUIPE'] || '').trim();
+              
               return {
                 ...row,
                 'Resultado (CVAT)': isNaN(resultValue) ? 0 : resultValue,
-                'NOME DA EQUIPE': row['NOME DA EQUIPE'] || row['EQUIPE'] || 'Equipe Sem Nome',
+                'NOME DA EQUIPE': teamName,
                 'Classificação (CVAT)': row['CLASSIFICAÇÃO (CVAT)'] || row['CLASSIFICAÇÃO'] || 'N/A',
                 'Pessoas Acompanhadas': row['PESSOAS ACOMPANHADAS'] || '0',
-                'PARÂMETRO POPULACIONAL': row['PARÂMETRO POPULACIONAL'] || '0'
+                'PARÂMETRO POPULACIONAL': row['PARÂMETRO POPULACIONAL'] || '0',
+                'Limite Normativo': getLimiteNormativo(municipalityPorte, teamName),
+                'MICI': mici,
+                'MICDT': micdt,
+                'Total Cadastro': mici + micdt,
+                'Mês': row['MÊS'] || row['MES'] || 'N/A',
+                'Ano': row['ANO'] || 'N/A'
               };
-            }).filter(item => item['NOME DA EQUIPE'] !== 'Equipe Sem Nome');
+            }).filter(item => item['NOME DA EQUIPE'] !== '' && item['NOME DA EQUIPE'] !== 'Equipe Sem Nome');
 
             if (parsedData.length === 0) {
               throw new Error('Nenhuma equipe válida encontrada no relatório.');
@@ -223,9 +308,8 @@ export default function App() {
 
             setData(sortedData as any);
             setSelectedTeam(sortedData[0]['NOME DA EQUIPE']);
-            setActiveTab('teams');
           } else {
-            throw new Error('Formato de colunas não reconhecido. Certifique-se de que o arquivo contém as colunas esperadas (CPF para nominal ou Equipe/Resultado para desempenho).');
+            throw new Error('Formato de colunas não reconhecido. Certifique-se de que o arquivo contém as colunas de Equipe e Resultado (CVAT).');
           }
           setLoading(false);
         } catch (err: any) {
@@ -246,13 +330,24 @@ export default function App() {
     setAnalyzing(true);
     try {
       const teamData = data.find(t => t['NOME DA EQUIPE'] === selectedTeam);
+      const totalCadastro = Number(teamData?.['Total Cadastro'] || 0);
+      const parametro = Number(teamData?.['Limite Normativo'] || teamData?.['PARÂMETRO POPULACIONAL'] || 0);
+      const diff = totalCadastro - parametro;
+      const needsRemapping = diff > 0;
+      const canReceive = diff < 0;
+
       const prompt = `Analise os seguintes dados de desempenho da equipe de saúde ${selectedTeam}:
       - Resultado CVAT: ${teamData?.['Resultado (CVAT)']}
       - Classificação: ${teamData?.['Classificação (CVAT)']}
       - Pessoas Acompanhadas: ${teamData?.['Pessoas Acompanhadas'] || 'N/A'}
-      - Parâmetro Populacional: ${teamData?.['PARÂMETRO POPULACIONAL'] || 'N/A'}
+      - Limite Normativo (Nota Técnica): ${parametro}
+      - Total Cadastro (MICI + MICDT): ${totalCadastro}
+      ${needsRemapping ? `- ALERTA: Esta equipe ultrapassou o limite populacional em ${diff} pessoas e necessita de remapeamento (retirar pacientes).` : ''}
+      ${canReceive ? `- INFORMAÇÃO: Esta equipe está abaixo do limite populacional em ${Math.abs(diff)} pessoas e pode receber novos pacientes para equilibrar a rede.` : ''}
       
       Com base nisso, crie uma Matriz SWOT focada em 'Vínculo e Acompanhamento'.
+      ${needsRemapping ? "Inclua o indicativo de remapeamento e a necessidade de direcionar as pessoas excedentes para outras equipes." : ""}
+      ${canReceive ? "Inclua a oportunidade de receber novos pacientes para atingir o parâmetro ideal e melhorar o vínculo territorial." : ""}
       Aponte Forças, Fraquezas, Oportunidades e Ameaças. 
       Ao final, dê 3 dicas práticas de gestão para melhorar o índice.`;
 
@@ -301,76 +396,25 @@ export default function App() {
     }
   };
 
-  const downloadNominalCSV = () => {
-    if (filteredNominal.length === 0) return;
-    const csv = Papa.unparse(filteredNominal);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `levantamento_nominal_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const toggleFollowUp = (index: number) => {
-    const newData = [...nominalData];
-    const currentStatus = newData[index].status.toLowerCase();
-    if (currentStatus.includes('ok') || currentStatus.includes('concluído')) {
-      newData[index].status = 'Pendente';
-    } else {
-      newData[index].status = 'Acompanhamento OK';
-    }
-    setNominalData(newData);
-  };
-
-  const nominalStats = {
-    total: nominalData.length,
-    followedUp: nominalData.filter(d => d.status.toLowerCase().includes('ok') || d.status.toLowerCase().includes('concluído')).length,
-    vulnerable: nominalData.filter(d => d.vulnerabilidade.toLowerCase() !== 'não identificada' && d.vulnerabilidade.toLowerCase() !== 'n/a').length
-  };
-
-  const globalStats = {
-    avgCVAT: data.length > 0 ? (data.reduce((acc, curr) => acc + curr['Resultado (CVAT)'], 0) / data.length).toFixed(2) : 0,
-    topClassification: data.length > 0 ? data[0]['Classificação  (CVAT)'] : 'N/A',
-    counts: {
-      otimo: data.filter(d => d['Classificação  (CVAT)'].toUpperCase().includes('ÓTIMO')).length,
-      bom: data.filter(d => d['Classificação  (CVAT)'].toUpperCase().includes('BOM')).length,
-      suficiente: data.filter(d => d['Classificação  (CVAT)'].toUpperCase().includes('SUFICIENTE')).length,
-      regular: data.filter(d => d['Classificação  (CVAT)'].toUpperCase().includes('REGULAR')).length,
-    }
-  };
-
-  const filteredNominal = nominalData.filter(item => {
-    const matchesSearch = item.nome.toLowerCase().includes(searchTerm.toLowerCase()) || 
-      item.cpf.includes(searchTerm) ||
-      item.equipe.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.ine.includes(searchTerm);
-    
-    const matchesIne = !ineFilter || item.ine === ineFilter;
-    
-    if (vulnerabilityFilters.length === 0) return matchesSearch && matchesIne;
-    
-    const itemVulnerabilities = item.vulnerabilidade.toLowerCase();
-    const matchesFilter = vulnerabilityFilters.some(filter => {
-      if (filter === 'BPC/PBF') {
-        return itemVulnerabilities.includes('bpc') || itemVulnerabilities.includes('pbf');
-      }
-      return itemVulnerabilities.includes(filter.toLowerCase());
-    });
-    
-    return matchesSearch && matchesFilter && matchesIne;
+  const filteredData = data.filter(item => {
+    const matchesSearch = (item['NOME DA EQUIPE'] || '').toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesMonth = selectedMonth === 'Todos' || item['Mês'] === selectedMonth;
+    const matchesYear = selectedYear === 'Todos' || String(item['Ano']) === selectedYear;
+    return matchesSearch && matchesMonth && matchesYear;
   });
 
-  const toggleVulnerabilityFilter = (filter: string) => {
-    setVulnerabilityFilters(prev => 
-      prev.includes(filter) 
-        ? prev.filter(f => f !== filter) 
-        : [...prev, filter]
-    );
+  const globalStats = {
+    avgCVAT: filteredData.length > 0 ? (filteredData.reduce((acc, curr) => acc + (curr['Resultado (CVAT)'] || 0), 0) / filteredData.length).toFixed(2) : 0,
+    counts: {
+      otimo: filteredData.filter(d => (d['Classificação (CVAT)'] || '').toUpperCase().includes('ÓTIMO')).length,
+      bom: filteredData.filter(d => (d['Classificação (CVAT)'] || '').toUpperCase().includes('BOM')).length,
+      suficiente: filteredData.filter(d => (d['Classificação (CVAT)'] || '').toUpperCase().includes('SUFICIENTE')).length,
+      regular: filteredData.filter(d => (d['Classificação (CVAT)'] || '').toUpperCase().includes('REGULAR')).length,
+    }
   };
+
+  const uniqueMonths = Array.from(new Set(data.map(item => item['Mês']).filter(Boolean))).sort();
+  const uniqueYears = Array.from(new Set(data.map(item => String(item['Ano'])).filter(Boolean))).sort();
 
   const top3 = data.slice(0, 3);
 
@@ -380,13 +424,8 @@ export default function App() {
       <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 h-20 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-white shadow-sm border-2 border-psf-green/20 relative overflow-hidden group">
-              <img 
-                src="https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Logotipo_do_Programa_Sa%C3%BAde_da_Fam%C3%ADlia.svg/1200px-Logotipo_do_Programa_Sa%C3%BAde_da_Fam%C3%ADlia.svg.png" 
-                alt="Logo PSF" 
-                className="w-12 h-12 object-contain relative z-10"
-                referrerPolicy="no-referrer"
-              />
+            <div className="relative p-2 bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+              <Home className="w-8 h-8 text-psf-blue relative z-10" />
               <div className="absolute inset-0 bg-gradient-to-br from-psf-green/5 to-psf-blue/5 group-hover:opacity-100 transition-opacity" />
             </div>
             <div>
@@ -400,26 +439,6 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <div className="hidden md:flex bg-slate-100 p-1 rounded-xl mr-4">
-              <button 
-                onClick={() => setActiveTab('teams')}
-                className={cn(
-                  "px-4 py-2 rounded-lg text-xs font-bold transition-all",
-                  activeTab === 'teams' ? "bg-white text-psf-blue shadow-sm" : "text-slate-500 hover:text-slate-700"
-                )}
-              >
-                Equipes
-              </button>
-              <button 
-                onClick={() => setActiveTab('nominal')}
-                className={cn(
-                  "px-4 py-2 rounded-lg text-xs font-bold transition-all",
-                  activeTab === 'nominal' ? "bg-white text-psf-blue shadow-sm" : "text-slate-500 hover:text-slate-700"
-                )}
-              >
-                Nominal
-              </button>
-            </div>
             <button 
               onClick={() => fileInputRef.current?.click()}
               className="flex items-center gap-2 bg-psf-blue hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md active:scale-95"
@@ -439,71 +458,7 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-8 space-y-8">
-        <AnimatePresence>
-          {uploadFeedback && (
-            <motion.div 
-              initial={{ opacity: 0, y: -20, height: 0 }}
-              animate={{ opacity: 1, y: 0, height: 'auto' }}
-              exit={{ opacity: 0, y: -20, height: 0 }}
-              className="bg-white border-2 border-slate-100 rounded-3xl p-6 shadow-sm overflow-hidden"
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="bg-psf-blue/10 p-2 rounded-lg">
-                    <Info className="text-psf-blue w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Feedback de Importação</h3>
-                    <p className="text-xs text-slate-500 font-medium">Relatório do tipo: <span className="text-psf-blue font-bold uppercase">{uploadFeedback.type === 'nominal' ? 'Levantamento Nominal' : 'Desempenho de Equipes'}</span></p>
-                  </div>
-                </div>
-                <button onClick={() => setUploadFeedback(null)} className="text-slate-400 hover:text-slate-600 transition-colors">
-                  <XCircle size={20} />
-                </button>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2 text-psf-green">
-                    <CheckCircle2 size={14} />
-                    <span className="text-[10px] font-black uppercase tracking-wider">Colunas Reconhecidas ({uploadFeedback.recognized.length})</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {uploadFeedback.recognized.map(col => (
-                      <span key={col} className="text-[9px] font-bold px-2 py-1 bg-psf-green/5 text-psf-green border border-psf-green/10 rounded-md">{col}</span>
-                    ))}
-                  </div>
-                </div>
-                
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2 text-slate-400">
-                    <Info size={14} />
-                    <span className="text-[10px] font-black uppercase tracking-wider">Colunas Ignoradas ({uploadFeedback.ignored.length})</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {uploadFeedback.ignored.length > 0 ? uploadFeedback.ignored.map(col => (
-                      <span key={col} className="text-[9px] font-bold px-2 py-1 bg-slate-50 text-slate-400 border border-slate-100 rounded-md">{col}</span>
-                    )) : <span className="text-[9px] text-slate-400 italic">Nenhuma coluna ignorada</span>}
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2 text-psf-red">
-                    <AlertCircle size={14} />
-                    <span className="text-[10px] font-black uppercase tracking-wider">Colunas Faltantes ({uploadFeedback.missing.length})</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {uploadFeedback.missing.length > 0 ? uploadFeedback.missing.map(col => (
-                      <span key={col} className="text-[9px] font-bold px-2 py-1 bg-psf-red/5 text-psf-red border border-psf-red/10 rounded-md">{col}</span>
-                    )) : <span className="text-[9px] text-psf-green font-bold">Tudo OK! Nenhuma coluna obrigatória faltando.</span>}
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {data.length === 0 && nominalData.length === 0 ? (
+        {data.length === 0 ? (
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -519,15 +474,55 @@ export default function App() {
             </div>
             <div className="max-w-md space-y-2">
               <h2 className="text-2xl font-black text-slate-800 tracking-tight">Gestão 360 da Atenção Primária</h2>
-              <p className="text-slate-500 text-sm leading-relaxed">Importe seus relatórios do SIAPS para monitorar o desempenho das equipes ou realizar o levantamento nominal de cidadãos por CPF.</p>
+              <p className="text-slate-500 text-sm leading-relaxed">Importe seus relatórios do SIAPS ou vincule uma planilha do Google Drive.</p>
             </div>
-            <button 
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-3 bg-white border-2 border-slate-200 hover:border-psf-blue text-slate-700 px-8 py-4 rounded-2xl font-bold transition-all shadow-sm group"
-            >
-              <Upload size={20} className="text-psf-blue group-hover:scale-110 transition-transform" />
-              Selecionar Relatório SIAPS
-            </button>
+
+            {!isLinkingSheet ? (
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-3 bg-white border-2 border-slate-200 hover:border-psf-blue text-slate-700 px-8 py-4 rounded-2xl font-bold transition-all shadow-sm group"
+                >
+                  <Upload size={20} className="text-psf-blue group-hover:scale-110 transition-transform" />
+                  Selecionar Relatório
+                </button>
+                <button 
+                  onClick={() => setIsLinkingSheet(true)}
+                  className="flex items-center gap-3 bg-psf-blue text-white px-8 py-4 rounded-2xl font-bold transition-all shadow-lg hover:bg-black active:scale-95"
+                >
+                  <FileText size={20} />
+                  Vincular Google Sheets
+                </button>
+              </div>
+            ) : (
+              <div className="w-full max-w-lg bg-white p-6 rounded-3xl border-2 border-psf-blue/20 shadow-xl space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Vincular Planilha Online</h3>
+                  <button onClick={() => setIsLinkingSheet(false)} className="text-slate-400 hover:text-psf-red">
+                    <X size={20} />
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  <input 
+                    type="text" 
+                    placeholder="Cole o link da planilha (Publicada na Web como CSV)"
+                    value={sheetUrl}
+                    onChange={(e) => setSheetUrl(e.target.value)}
+                    className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-xl focus:border-psf-blue outline-none text-sm transition-all"
+                  />
+                  <p className="text-[10px] text-slate-400 leading-tight">
+                    Dica: No Google Sheets, vá em Arquivo &gt; Compartilhar &gt; Publicar na Web &gt; Escolha a aba e selecione "Valores separados por vírgula (.csv)".
+                  </p>
+                </div>
+                <button 
+                  onClick={fetchFromGoogleSheets}
+                  disabled={!sheetUrl || loading}
+                  className="w-full bg-psf-blue text-white py-4 rounded-xl font-bold hover:bg-black transition-all disabled:opacity-50"
+                >
+                  {loading ? 'Sincronizando...' : 'Sincronizar Agora'}
+                </button>
+              </div>
+            )}
             {error && (
               <div className="flex items-center gap-2 text-red-600 bg-red-50 px-4 py-2 rounded-lg border border-red-100">
                 <AlertCircle size={18} />
@@ -537,48 +532,37 @@ export default function App() {
           </motion.div>
         ) : (
           <>
-            {activeTab === 'teams' ? (
-              <>
-                {/* Global Diagnosis Summary */}
-                <div className="flex flex-col gap-6">
-                  <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className="glass-card p-4 flex items-center gap-4 border-l-4 border-psf-blue">
-                      <div className="bg-psf-blue/10 p-3 rounded-xl">
-                        <Activity className="text-psf-blue w-6 h-6" />
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Média CVAT Global</p>
-                        <p className="text-xl font-black text-slate-800">{globalStats.avgCVAT}</p>
-                      </div>
-                    </div>
-                    <div className="glass-card p-4 flex items-center gap-4 border-l-4 border-psf-green">
-                      <div className="bg-psf-green/10 p-3 rounded-xl">
-                        <Target className="text-psf-green w-6 h-6" />
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Melhor Classificação</p>
-                        <p className="text-xl font-black text-slate-800">{globalStats.topClassification}</p>
-                      </div>
-                    </div>
-                    <div className="glass-card p-4 flex items-center gap-4 border-l-4 border-psf-yellow">
-                      <div className="bg-psf-yellow/10 p-3 rounded-xl">
-                        <Users className="text-psf-yellow w-6 h-6" />
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total de Equipes</p>
-                        <p className="text-xl font-black text-slate-800">{data.length}</p>
-                      </div>
-                    </div>
-                    <div className="glass-card p-4 flex items-center gap-4 border-l-4 border-psf-red">
-                      <div className="bg-psf-red/10 p-3 rounded-xl">
-                        <AlertCircle className="text-psf-red w-6 h-6" />
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Equipes Críticas</p>
-                        <p className="text-xl font-black text-slate-800">{globalStats.counts.regular + globalStats.counts.suficiente}</p>
-                      </div>
-                    </div>
-                  </section>
+            {/* Global Diagnosis Summary */}
+            <div className="flex flex-col gap-6">
+              <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="glass-card p-4 flex items-center gap-4 border-l-4 border-psf-blue">
+                  <div className="bg-psf-blue/10 p-3 rounded-xl">
+                    <Activity className="text-psf-blue w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Média CVAT Global</p>
+                    <p className="text-xl font-black text-slate-800">{globalStats.avgCVAT}</p>
+                  </div>
+                </div>
+                <div className="glass-card p-4 flex items-center gap-4 border-l-4 border-psf-yellow">
+                  <div className="bg-psf-yellow/10 p-3 rounded-xl">
+                    <Users className="text-psf-yellow w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total de Equipes</p>
+                    <p className="text-xl font-black text-slate-800">{filteredData.length}</p>
+                  </div>
+                </div>
+                <div className="glass-card p-4 flex items-center gap-4 border-l-4 border-psf-red">
+                  <div className="bg-psf-red/10 p-3 rounded-xl">
+                    <AlertCircle className="text-psf-red w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Equipes Críticas</p>
+                    <p className="text-xl font-black text-slate-800">{globalStats.counts.regular + globalStats.counts.suficiente}</p>
+                  </div>
+                </div>
+              </section>
 
                   {/* Classification Breakdown Detail */}
                   <div className="glass-card p-6">
@@ -598,7 +582,7 @@ export default function App() {
                         <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                           <motion.div 
                             initial={{ width: 0 }}
-                            animate={{ width: `${(globalStats.counts.otimo / data.length) * 100}%` }}
+                            animate={{ width: `${(globalStats.counts.otimo / (filteredData.length || 1)) * 100}%` }}
                             className="h-full bg-psf-blue"
                           />
                         </div>
@@ -611,7 +595,7 @@ export default function App() {
                         <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                           <motion.div 
                             initial={{ width: 0 }}
-                            animate={{ width: `${(globalStats.counts.bom / data.length) * 100}%` }}
+                            animate={{ width: `${(globalStats.counts.bom / (filteredData.length || 1)) * 100}%` }}
                             className="h-full bg-psf-green"
                           />
                         </div>
@@ -624,7 +608,7 @@ export default function App() {
                         <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                           <motion.div 
                             initial={{ width: 0 }}
-                            animate={{ width: `${(globalStats.counts.suficiente / data.length) * 100}%` }}
+                            animate={{ width: `${(globalStats.counts.suficiente / (filteredData.length || 1)) * 100}%` }}
                             className="h-full bg-psf-yellow"
                           />
                         </div>
@@ -637,7 +621,7 @@ export default function App() {
                         <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                           <motion.div 
                             initial={{ width: 0 }}
-                            animate={{ width: `${(globalStats.counts.regular / data.length) * 100}%` }}
+                            animate={{ width: `${(globalStats.counts.regular / (filteredData.length || 1)) * 100}%` }}
                             className="h-full bg-psf-red"
                           />
                         </div>
@@ -685,14 +669,65 @@ export default function App() {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                   {/* Ranking Table */}
                   <div className="lg:col-span-2 space-y-4">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col md:flex-row items-center justify-between gap-4">
                       <div className="flex items-center gap-2">
                         <TrendingUp className="text-psf-blue" />
                         <h2 className="text-sm font-black text-slate-800 uppercase tracking-[0.2em]">Ranking de Equipes</h2>
                       </div>
-                      <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-3 py-1.5 rounded-lg uppercase tracking-widest">
-                        {data.length} Unidades
-                      </span>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <div className="relative w-full md:w-40">
+                          <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
+                          <select 
+                            value={selectedMonth}
+                            onChange={(e) => setSelectedMonth(e.target.value)}
+                            className="w-full bg-white border-2 border-slate-100 rounded-2xl pl-11 pr-4 py-2.5 text-xs font-bold text-slate-600 focus:outline-none focus:border-psf-blue transition-all shadow-sm appearance-none cursor-pointer"
+                          >
+                            <option value="Todos">Mês: Todos</option>
+                            {uniqueMonths.map(m => (
+                              <option key={m} value={m}>{m}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="relative w-full md:w-32">
+                          <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
+                          <select 
+                            value={selectedYear}
+                            onChange={(e) => setSelectedYear(e.target.value)}
+                            className="w-full bg-white border-2 border-slate-100 rounded-2xl pl-11 pr-4 py-2.5 text-xs font-bold text-slate-600 focus:outline-none focus:border-psf-blue transition-all shadow-sm appearance-none cursor-pointer"
+                          >
+                            <option value="Todos">Ano: Todos</option>
+                            {uniqueYears.map(y => (
+                              <option key={y} value={y}>{y}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="relative w-full md:w-48 hidden">
+                          <Users className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
+                          <select 
+                            value={municipalityPorte}
+                            onChange={(e) => setMunicipalityPorte(Number(e.target.value))}
+                            className="w-full bg-white border-2 border-slate-100 rounded-2xl pl-11 pr-4 py-2.5 text-xs font-bold text-slate-600 focus:outline-none focus:border-psf-blue transition-all shadow-sm appearance-none cursor-pointer"
+                          >
+                            <option value={1}>Porte 1: Até 20k</option>
+                            <option value={2}>Porte 2: 20k - 50k</option>
+                            <option value={3}>Porte 3: 50k - 100k</option>
+                            <option value={4}>Porte 4: Acima 100k</option>
+                          </select>
+                        </div>
+                        <div className="relative w-full md:w-64">
+                          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
+                          <input 
+                            type="text" 
+                            placeholder="Buscar equipe..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="w-full bg-white border-2 border-slate-100 rounded-2xl pl-11 pr-4 py-2.5 text-xs font-medium focus:outline-none focus:border-psf-blue transition-all shadow-sm"
+                          />
+                        </div>
+                        <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-3 py-1.5 rounded-lg uppercase tracking-widest">
+                          {filteredData.length} Unidades
+                        </span>
+                      </div>
                     </div>
                     <div className="glass-card overflow-hidden border-slate-100">
                       <div className="overflow-x-auto">
@@ -701,12 +736,24 @@ export default function App() {
                             <tr className="bg-slate-50/50 border-b border-slate-100">
                               <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Pos</th>
                               <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Equipe</th>
-                              <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Desempenho</th>
+                              <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Acompanhadas</th>
+                              <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Cadastro</th>
+                              <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                <div className="flex items-center gap-1 group relative">
+                                  Limite Máximo
+                                  <Info className="w-3 h-3 text-slate-300 cursor-help" />
+                                  <div className="absolute bottom-full left-0 mb-2 px-2 py-1 bg-slate-900 text-white text-[8px] font-bold rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none normal-case tracking-normal">
+                                    Capacidade máxima permitida pela NT 30/2025
+                                  </div>
+                                </div>
+                              </th>
+                              <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Parâmetro</th>
+                              <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">CVAT</th>
                               <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {data.map((team, index) => (
+                            {filteredData.map((team, index) => (
                               <tr 
                                 key={team['NOME DA EQUIPE']} 
                                 className="border-b border-slate-50 hover:bg-slate-50/80 transition-colors cursor-default group"
@@ -720,17 +767,54 @@ export default function App() {
                                   </span>
                                 </td>
                                 <td className="px-6 py-4">
-                                  <div className="font-bold text-slate-700">{team['NOME DA EQUIPE']}</div>
+                                  <div className="flex items-center gap-2">
+                                    <div className="font-bold text-slate-700">{team['NOME DA EQUIPE']}</div>
+                                    {(() => {
+                                      const total = Number(team['Total Cadastro']);
+                                      const limit = Number(team['Limite Normativo'] || team['PARÂMETRO POPULACIONAL']);
+                                      const diff = total - limit;
+                                      
+                                      if (diff > 0) {
+                                        return (
+                                          <div className="group relative">
+                                            <Map className="w-3.5 h-3.5 text-psf-red animate-pulse" />
+                                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-900 text-white text-[8px] font-bold rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
+                                              Retirar: {diff} pessoas (Excesso)
+                                            </div>
+                                          </div>
+                                        );
+                                      } else if (diff < 0) {
+                                        return (
+                                          <div className="group relative">
+                                            <Map className="w-3.5 h-3.5 text-emerald-500" />
+                                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-900 text-white text-[8px] font-bold rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
+                                              Receber: {Math.abs(diff)} pessoas (Vaga)
+                                            </div>
+                                          </div>
+                                        );
+                                      }
+                                      return null;
+                                    })()}
+                                  </div>
                                   <div className="text-[10px] text-slate-400 font-medium uppercase tracking-tighter">Unidade de Saúde da Família</div>
                                 </td>
                                 <td className="px-6 py-4">
+                                  <div className="text-xs font-bold text-slate-600">{team['Pessoas Acompanhadas']}</div>
+                                </td>
+                                <td className="px-6 py-4">
+                                  <div className="text-xs font-bold text-slate-600">{team['Total Cadastro']}</div>
+                                </td>
+                                <td className="px-6 py-4">
+                                  <div className="flex flex-col">
+                                    <span className="text-xs font-black text-psf-blue">{team['Limite Normativo']}</span>
+                                    <span className="text-[8px] text-slate-400 font-bold uppercase tracking-tighter">Pessoas</span>
+                                  </div>
+                                </td>
+                                <td className="px-6 py-4">
+                                  <div className="text-xs font-bold text-slate-600">{team['PARÂMETRO POPULACIONAL']}</div>
+                                </td>
+                                <td className="px-6 py-4">
                                   <div className="flex items-center gap-3">
-                                    <div className="w-20 bg-slate-100 h-2 rounded-full overflow-hidden">
-                                      <div 
-                                        className="bg-psf-blue h-full transition-all duration-1000" 
-                                        style={{ width: `${Math.min((team['Resultado (CVAT)'] / (top3[0]?.['Resultado (CVAT)'] || 1)) * 100, 100)}%` }}
-                                      />
-                                    </div>
                                     <span className="font-black text-slate-800 tracking-tighter">{team['Resultado (CVAT)']}</span>
                                   </div>
                                 </td>
@@ -767,13 +851,73 @@ export default function App() {
                             onChange={(e) => setSelectedTeam(e.target.value)}
                             className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-4 py-3 text-sm font-bold text-slate-700 focus:outline-none focus:border-psf-blue transition-all appearance-none cursor-pointer"
                           >
-                            {data.map(team => (
+                            {filteredData.map(team => (
                               <option key={team['NOME DA EQUIPE']} value={team['NOME DA EQUIPE']}>
                                 {team['NOME DA EQUIPE']}
                               </option>
                             ))}
                           </select>
                         </div>
+
+                        {selectedTeam && (() => {
+                          const team = data.find(t => t['NOME DA EQUIPE'] === selectedTeam);
+                          const total = Number(team?.['Total Cadastro'] || 0);
+                          const param = Number(team?.['Limite Normativo'] || team?.['PARÂMETRO POPULACIONAL'] || 0);
+                          const needsRemap = total > param;
+                          const excess = total - param;
+
+                          return (
+                            <div className="space-y-3">
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Acompanhadas</p>
+                                  <p className="text-sm font-black text-slate-800">{team?.['Pessoas Acompanhadas']}</p>
+                                </div>
+                                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Cadastro</p>
+                                  <p className="text-sm font-black text-slate-800">{total}</p>
+                                </div>
+                                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Limite Máximo</p>
+                                  <p className="text-sm font-black text-psf-blue">{param}</p>
+                                </div>
+                                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Resultado CVAT</p>
+                                  <p className="text-sm font-black text-psf-blue">{team?.['Resultado (CVAT)']}</p>
+                                </div>
+                              </div>
+                              
+                              {needsRemap && (
+                                <div className="bg-psf-red/5 border border-psf-red/20 p-3 rounded-xl flex items-start gap-3">
+                                  <div className="bg-psf-red/10 p-2 rounded-lg">
+                                    <Map className="text-psf-red w-4 h-4" />
+                                  </div>
+                                  <div>
+                                    <p className="text-[10px] font-black text-psf-red uppercase tracking-widest">Remapeamento: Retirar</p>
+                                    <p className="text-xs font-bold text-slate-700 mt-0.5">
+                                      Excesso de {excess} pessoas.
+                                    </p>
+                                  </div>
+                                </div>
+                              )}
+
+                              {total < param && (
+                                <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-xl flex items-start gap-3">
+                                  <div className="bg-emerald-100 p-2 rounded-lg">
+                                    <Map className="text-emerald-600 w-4 h-4" />
+                                  </div>
+                                  <div>
+                                    <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">Remapeamento: Receber</p>
+                                    <p className="text-xs font-bold text-slate-700 mt-0.5">
+                                      Vaga para {param - total} pessoas.
+                                    </p>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+
                         <button 
                           onClick={generateSWOT}
                           disabled={analyzing}
@@ -811,204 +955,6 @@ export default function App() {
                     </section>
                   </div>
                 </div>
-              </>
-            ) : (
-              /* Nominal List View */
-              <section className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div className="glass-card p-5 bg-gradient-to-br from-white to-psf-blue/5">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total de Cidadãos</p>
-                    <p className="text-3xl font-black text-slate-800">{nominalStats.total}</p>
-                  </div>
-                  <div className="glass-card p-5 bg-gradient-to-br from-white to-psf-green/5">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Acompanhamento OK</p>
-                    <div className="flex items-end gap-2">
-                      <p className="text-3xl font-black text-psf-green">{nominalStats.followedUp}</p>
-                      <p className="text-xs font-bold text-slate-400 mb-1">({((nominalStats.followedUp / (nominalStats.total || 1)) * 100).toFixed(1)}%)</p>
-                    </div>
-                  </div>
-                  <div className="glass-card p-5 bg-gradient-to-br from-white to-psf-red/5">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Prioridade (Vulneráveis)</p>
-                    <p className="text-3xl font-black text-psf-red">{nominalStats.vulnerable}</p>
-                  </div>
-                  <div className="glass-card p-5 bg-psf-blue/5 border-psf-blue/20 flex flex-col justify-center items-center text-center cursor-pointer hover:bg-psf-blue/10 transition-all group" onClick={() => fileInputRef.current?.click()}>
-                    <Upload className="text-psf-blue mb-2 group-hover:scale-110 transition-transform" size={24} />
-                    <p className="text-[10px] font-black text-psf-blue uppercase tracking-widest">Atualizar Lista Nominal</p>
-                  </div>
-                </div>
-
-                {nominalStats.vulnerable > 0 && (
-                  <motion.div 
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="bg-psf-red/5 border border-psf-red/10 p-4 rounded-2xl flex items-start gap-4"
-                  >
-                    <div className="bg-psf-red/10 p-2 rounded-lg">
-                      <AlertCircle className="text-psf-red w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-black text-psf-red uppercase tracking-widest">Atenção Prioritária</h4>
-                      <p className="text-xs text-slate-600 font-medium mt-1">
-                        Identificamos {nominalStats.vulnerable} cidadãos com critérios de vulnerabilidade (Idosos, Crianças, BPC/PBF). 
-                        Recomendamos priorizar a busca ativa e o acompanhamento destes casos para fortalecer o vínculo e melhorar o CVAT de acompanhamento.
-                      </p>
-                    </div>
-                  </motion.div>
-                )}
-
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div className="flex items-center gap-2">
-                    <UserCheck className="text-psf-green" />
-                    <h2 className="text-sm font-black text-slate-800 uppercase tracking-[0.2em]">Levantamento Nominal</h2>
-                    <div className="group relative">
-                      <AlertCircle size={14} className="text-slate-400 cursor-help" />
-                      <div className="absolute bottom-full left-0 mb-2 w-64 p-3 bg-slate-800 text-white text-[10px] rounded-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20 shadow-xl">
-                        <p className="font-bold mb-1">Colunas Detectadas para Prioridade:</p>
-                        <ul className="list-disc pl-3 space-y-1 opacity-80">
-                          <li><b>IDADE:</b> Identifica Idosos (≥60) e Crianças (≤12)</li>
-                          <li><b>BPC / PBF:</b> Identifica beneficiários de programas sociais</li>
-                          <li><b>GESTANTE:</b> Identifica gestantes para pré-natal</li>
-                        </ul>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <button 
-                      onClick={downloadNominalCSV}
-                      className="flex items-center gap-2 bg-white border-2 border-slate-100 hover:border-psf-green text-slate-600 px-4 py-3 rounded-2xl text-xs font-bold transition-all shadow-sm active:scale-95"
-                    >
-                      <FileText size={16} className="text-psf-green" />
-                      Exportar CSV
-                    </button>
-                    <div className="relative w-full md:w-48">
-                      <Filter className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-                      <select 
-                        value={ineFilter}
-                        onChange={(e) => setIneFilter(e.target.value)}
-                        className="w-full bg-white border-2 border-slate-100 rounded-2xl pl-11 pr-4 py-3 text-sm font-bold text-slate-600 focus:outline-none focus:border-psf-blue transition-all shadow-sm appearance-none cursor-pointer"
-                      >
-                        <option value="">Todos os INEs</option>
-                        {Array.from(new Set(nominalData.map(d => d.ine))).filter(ine => ine !== 'Não Informado' && ine !== 'N/A').sort().map(ine => (
-                          <option key={ine} value={ine}>INE: {ine}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="relative w-full md:w-80">
-                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-                      <input 
-                        type="text" 
-                        placeholder="Buscar por Nome, CPF ou Equipe..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full bg-white border-2 border-slate-100 rounded-2xl pl-11 pr-4 py-3 text-sm font-medium focus:outline-none focus:border-psf-blue transition-all shadow-sm"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mr-2">Filtrar Prioridades:</span>
-                  {['Idoso', 'Criança', 'BPC/PBF', 'Gestante'].map(filter => (
-                    <button
-                      key={filter}
-                      onClick={() => toggleVulnerabilityFilter(filter)}
-                      className={cn(
-                        "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border-2",
-                        vulnerabilityFilters.includes(filter)
-                          ? "bg-psf-red text-white border-psf-red shadow-md scale-105"
-                          : "bg-white text-slate-500 border-slate-100 hover:border-psf-red/30"
-                      )}
-                    >
-                      {filter}
-                    </button>
-                  ))}
-                  {vulnerabilityFilters.length > 0 && (
-                    <button 
-                      onClick={() => setVulnerabilityFilters([])}
-                      className="text-[10px] font-bold text-psf-red hover:underline ml-2"
-                    >
-                      Limpar Filtros
-                    </button>
-                  )}
-                </div>
-
-                <div className="glass-card overflow-hidden border-slate-100 shadow-lg">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-slate-100/50 border-b-2 border-slate-200">
-                          <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest border-r border-slate-200/50">CPF</th>
-                          <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest border-r border-slate-200/50">Cidadão</th>
-                          <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest border-r border-slate-200/50">INE</th>
-                          <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest border-r border-slate-200/50">Equipe Responsável</th>
-                          <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest border-r border-slate-200/50">Vulnerabilidade</th>
-                          <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest border-r border-slate-200/50">Status</th>
-                          <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Ações</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {filteredNominal.length > 0 ? (
-                          filteredNominal.map((item, index) => (
-                            <tr key={index} className="even:bg-slate-50/40 hover:bg-psf-blue/5 transition-colors group">
-                              <td className="px-6 py-4 font-mono text-xs text-slate-500 border-r border-slate-100/50">{item.cpf}</td>
-                              <td className="px-6 py-4 border-r border-slate-100/50">
-                                <p className="font-bold text-slate-700 group-hover:text-psf-blue transition-colors">{item.nome}</p>
-                              </td>
-                              <td className="px-6 py-4 text-xs font-black text-psf-blue border-r border-slate-100/50">{item.ine}</td>
-                              <td className="px-6 py-4 text-xs font-medium text-slate-500 uppercase border-r border-slate-100/50">{item.equipe}</td>
-                              <td className="px-6 py-4 border-r border-slate-100/50">
-                                <span className={cn(
-                                  "text-[10px] font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 w-fit shadow-sm",
-                                  item.isPriority ? "bg-psf-red/10 text-psf-red border border-psf-red/20" : "bg-slate-100 text-slate-500 border border-slate-200"
-                                )}>
-                                  {item.isPriority && <AlertCircle size={12} />}
-                                  {item.vulnerabilidade}
-                                </span>
-                              </td>
-                              <td className="px-6 py-4 border-r border-slate-100/50">
-                                <span className={cn(
-                                  "text-[9px] font-black px-3 py-2 rounded-xl uppercase tracking-widest border shadow-sm inline-block",
-                                  item.status.toLowerCase().includes('ok') || item.status.toLowerCase().includes('concluído') 
-                                    ? "bg-green-50 text-green-700 border-green-200" 
-                                    : "bg-amber-50 text-amber-700 border-amber-200"
-                                )}>
-                                  {item.status}
-                                </span>
-                              </td>
-                              <td className="px-6 py-4">
-                                <div className="flex items-center gap-2">
-                                  <button 
-                                    onClick={() => toggleFollowUp(index)}
-                                    className={cn(
-                                      "p-2.5 rounded-xl transition-all active:scale-95 border shadow-sm",
-                                      item.status.toLowerCase().includes('ok') || item.status.toLowerCase().includes('concluído')
-                                        ? "text-slate-400 hover:text-psf-red bg-white border-slate-100 hover:border-psf-red/20"
-                                        : "text-psf-green hover:bg-psf-green/10 bg-white border-slate-100 hover:border-psf-green/20"
-                                    )}
-                                    title={item.status.toLowerCase().includes('ok') ? "Remover Acompanhamento" : "Marcar como Acompanhado"}
-                                  >
-                                    {item.status.toLowerCase().includes('ok') ? <RefreshCw size={18} /> : <UserCheck size={18} />}
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))
-                        ) : (
-                          <tr>
-                            <td colSpan={7} className="px-6 py-24 text-center">
-                              <div className="flex flex-col items-center gap-3">
-                                <Search size={40} className="text-slate-200" />
-                                <p className="text-slate-400 font-medium">Nenhum registro encontrado para "{searchTerm}" {ineFilter && `no INE ${ineFilter}`}</p>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </section>
-            )}
 
             {/* Global Chat Floating Button/Panel */}
             <div className="fixed bottom-8 right-8 z-50">
