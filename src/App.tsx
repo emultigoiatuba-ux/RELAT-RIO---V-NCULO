@@ -38,6 +38,15 @@ import { SIAPSData, Message } from './types';
 import { cn } from './lib/utils';
 import { CheckCircle2, Info, XCircle } from 'lucide-react';
 
+declare global {
+  interface Window {
+    aistudio: {
+      hasSelectedApiKey: () => Promise<boolean>;
+      openSelectKey: () => Promise<void>;
+    };
+  }
+}
+
 const SYSTEM_INSTRUCTION = `Você é um Consultor Especialista em Gestão da Atenção Primária à Saúde, com profundo conhecimento da Nota Técnica Nº 30/2025-CGESCO/DESCO/SAPS/MS. 
 
 Seu objetivo é analisar os dados do SIAPS (vínculo e acompanhamento) e fornecer orientações práticas baseadas na metodologia oficial:
@@ -60,7 +69,7 @@ Seu objetivo é analisar os dados do SIAPS (vínculo e acompanhamento) e fornece
 
 Use uma linguagem acolhedora, técnica e motivadora. Explique que o cadastro territorializa e identifica, enquanto o acompanhamento consolida a continuidade do cuidado.`;
 
-const getLimiteNormativo = (porte: number, teamName: string) => {
+const getParametroMinimo = (porte: number, teamName: string) => {
   const name = teamName.toUpperCase();
   const isEAP30 = name.includes('EAP 30') || name.includes('EAP30');
   const isEAP20 = name.includes('EAP 20') || name.includes('EAP20');
@@ -84,6 +93,32 @@ const getLimiteNormativo = (porte: number, teamName: string) => {
   if (isEAP20) return 1500;
   if (isEAP30 || isEAP) return 2250;
   return 3000;
+};
+
+const getParametroMaximo = (porte: number, teamName: string) => {
+  const name = teamName.toUpperCase();
+  const isEAP30 = name.includes('EAP 30') || name.includes('EAP30');
+  const isEAP20 = name.includes('EAP 20') || name.includes('EAP20');
+  const isEAP = name.includes('EAP') && !isEAP30 && !isEAP20;
+  
+  if (porte === 1) {
+    if (isEAP20) return 1750;
+    if (isEAP30 || isEAP) return 2625;
+    return 3500;
+  }
+  if (porte === 2) {
+    if (isEAP20) return 1750;
+    if (isEAP30 || isEAP) return 2625;
+    return 3500;
+  }
+  if (porte === 3) {
+    if (isEAP20) return 1750;
+    if (isEAP30 || isEAP) return 2625;
+    return 3500;
+  }
+  if (isEAP20) return 1750;
+  if (isEAP30 || isEAP) return 2813;
+  return 3750;
 };
 
 const getClassificationRank = (classification: string | undefined) => {
@@ -111,10 +146,11 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedTeam, setSelectedTeam] = useState<string>('');
-  const [selectedMonth, setSelectedMonth] = useState<string>('Todos');
-  const [selectedYear, setSelectedYear] = useState<string>('Todos');
+  const [selectedCompetence, setSelectedCompetence] = useState<string>('Todos');
   const [swotAnalysis, setSwotAnalysis] = useState<string | null>(null);
+  const [actionPlan, setActionPlan] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [planning, setPlanning] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
@@ -122,11 +158,17 @@ export default function App() {
   const [sheetUrl, setSheetUrl] = useState('');
   const [isLinkingSheet, setIsLinkingSheet] = useState(false);
   const [municipalityPorte, setMunicipalityPorte] = useState<number>(2);
+  const [selectedTeamsForComparison, setSelectedTeamsForComparison] = useState<string[]>([]);
+  const [comparativeAnalysis, setComparativeAnalysis] = useState<string | null>(null);
+  const [comparing, setComparing] = useState(false);
+  const [showManual, setShowManual] = useState(false);
   
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+  const getAI = () => {
+    return new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+  };
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -202,7 +244,20 @@ export default function App() {
                 'Classificação (CVAT)': row['CLASSIFICAÇÃO (CVAT)'] || row['CLASSIFICAÇÃO'] || 'N/A',
                 'Pessoas Acompanhadas': row['PESSOAS ACOMPANHADAS'] || '0',
                 'PARÂMETRO POPULACIONAL': row['PARÂMETRO POPULACIONAL'] || '0',
-                'Limite Normativo': getLimiteNormativo(municipalityPorte, teamName),
+                'PARÂMETRO POPULACIONAL - MÍNIMO': row['PARÂMETRO POPULACIONAL - MÍNIMO'] || '0',
+                'PARÂMETRO POPULACIONAL - MÁXIMO': row['PARÂMETRO POPULACIONAL - MÁXIMO'] || '0',
+                'CADASTRO INDIVIDUAL': row['CADASTRO INDIVIDUAL'] || '0',
+                'CADASTRO INDIVIDUAL E CADASTRO DOMICILIAR': row['CADASTRO INDIVIDUAL E CADASTRO DOMICILIAR'] || '0',
+                'PESSOAS COM SOMENTE CADASTRO INDIVIDUAL OU TERRITORIAL': row['PESSOAS COM SOMENTE CADASTRO INDIVIDUAL OU TERRITORIAL'] || '0',
+                'PESSOAS VINCULADAS E ACOMPANHADAS': row['PESSOAS VINCULADAS E ACOMPANHADAS'] || '0',
+                'PESSOA ACOMPANHADA SEM CRITÉRIO DE VULNERABILIDADE': row['PESSOA ACOMPANHADA SEM CRITÉRIO DE VULNERABILIDADE'] || '0',
+                'BENEFICIÁRIO BPC OU PBF': row['BENEFICIÁRIO BPC OU PBF'] || '0',
+                'CRIANÇA ACOMPANHADA': row['CRIANÇA ACOMPANHADA'] || '0',
+                'CRIANÇA BENEFICIÁRIA BPC OU PBF': row['CRIANÇA BENEFICIÁRIA BPC OU PBF'] || '0',
+                'PESSOA IDOSA ACOMPANHADA': row['PESSOA IDOSA ACOMPANHADA'] || '0',
+                'PESSOA IDOSA BENEFICIÁRIA BPC OU PBF': row['PESSOA IDOSA BENEFICIÁRIA BPC OU PBF'] || '0',
+                'Limite Normativo': getParametroMinimo(municipalityPorte, teamName),
+                'Limite Máximo': getParametroMaximo(municipalityPorte, teamName),
                 'MICI': mici,
                 'MICDT': micdt,
                 'Total Cadastro': mici + micdt,
@@ -286,7 +341,20 @@ export default function App() {
                 'Classificação (CVAT)': row['CLASSIFICAÇÃO (CVAT)'] || row['CLASSIFICAÇÃO'] || 'N/A',
                 'Pessoas Acompanhadas': row['PESSOAS ACOMPANHADAS'] || '0',
                 'PARÂMETRO POPULACIONAL': row['PARÂMETRO POPULACIONAL'] || '0',
-                'Limite Normativo': getLimiteNormativo(municipalityPorte, teamName),
+                'PARÂMETRO POPULACIONAL - MÍNIMO': row['PARÂMETRO POPULACIONAL - MÍNIMO'] || '0',
+                'PARÂMETRO POPULACIONAL - MÁXIMO': row['PARÂMETRO POPULACIONAL - MÁXIMO'] || '0',
+                'CADASTRO INDIVIDUAL': row['CADASTRO INDIVIDUAL'] || '0',
+                'CADASTRO INDIVIDUAL E CADASTRO DOMICILIAR': row['CADASTRO INDIVIDUAL E CADASTRO DOMICILIAR'] || '0',
+                'PESSOAS COM SOMENTE CADASTRO INDIVIDUAL OU TERRITORIAL': row['PESSOAS COM SOMENTE CADASTRO INDIVIDUAL OU TERRITORIAL'] || '0',
+                'PESSOAS VINCULADAS E ACOMPANHADAS': row['PESSOAS VINCULADAS E ACOMPANHADAS'] || '0',
+                'PESSOA ACOMPANHADA SEM CRITÉRIO DE VULNERABILIDADE': row['PESSOA ACOMPANHADA SEM CRITÉRIO DE VULNERABILIDADE'] || '0',
+                'BENEFICIÁRIO BPC OU PBF': row['BENEFICIÁRIO BPC OU PBF'] || '0',
+                'CRIANÇA ACOMPANHADA': row['CRIANÇA ACOMPANHADA'] || '0',
+                'CRIANÇA BENEFICIÁRIA BPC OU PBF': row['CRIANÇA BENEFICIÁRIA BPC OU PBF'] || '0',
+                'PESSOA IDOSA ACOMPANHADA': row['PESSOA IDOSA ACOMPANHADA'] || '0',
+                'PESSOA IDOSA BENEFICIÁRIA BPC OU PBF': row['PESSOA IDOSA BENEFICIÁRIA BPC OU PBF'] || '0',
+                'Limite Normativo': getParametroMinimo(municipalityPorte, teamName),
+                'Limite Máximo': getParametroMaximo(municipalityPorte, teamName),
                 'MICI': mici,
                 'MICDT': micdt,
                 'Total Cadastro': mici + micdt,
@@ -329,27 +397,32 @@ export default function App() {
     
     setAnalyzing(true);
     try {
+      const ai = getAI();
       const teamData = data.find(t => t['NOME DA EQUIPE'] === selectedTeam);
       const totalCadastro = Number(teamData?.['Total Cadastro'] || 0);
-      const parametro = Number(teamData?.['Limite Normativo'] || teamData?.['PARÂMETRO POPULACIONAL'] || 0);
-      const diff = totalCadastro - parametro;
-      const needsRemapping = diff > 0;
-      const canReceive = diff < 0;
+      const minParam = Number(teamData?.['Limite Normativo'] || 0);
+      const maxParam = Number(teamData?.['Limite Máximo'] || 0);
+      const needsRetirar = totalCadastro > maxParam;
+      const canReceive = totalCadastro < minParam;
 
       const prompt = `Analise os seguintes dados de desempenho da equipe de saúde ${selectedTeam}:
       - Resultado CVAT: ${teamData?.['Resultado (CVAT)']}
       - Classificação: ${teamData?.['Classificação (CVAT)']}
-      - Pessoas Acompanhadas: ${teamData?.['Pessoas Acompanhadas'] || 'N/A'}
-      - Limite Normativo (Nota Técnica): ${parametro}
+      - Pessoas Acompanhadas: ${teamData?.['PESSOAS VINCULADAS E ACOMPANHADAS'] || 'N/A'}
+      - Parâmetro Mínimo (Nota Técnica): ${minParam}
+      - Parâmetro Máximo (Nota Técnica): ${maxParam}
       - Total Cadastro (MICI + MICDT): ${totalCadastro}
-      ${needsRemapping ? `- ALERTA: Esta equipe ultrapassou o limite populacional em ${diff} pessoas e necessita de remapeamento (retirar pacientes).` : ''}
-      ${canReceive ? `- INFORMAÇÃO: Esta equipe está abaixo do limite populacional em ${Math.abs(diff)} pessoas e pode receber novos pacientes para equilibrar a rede.` : ''}
+      ${needsRetirar ? `- ALERTA: Esta equipe ultrapassou o limite populacional máximo em ${totalCadastro - maxParam} pessoas e necessita de remapeamento (retirar pacientes).` : ''}
+      ${canReceive ? `- INFORMAÇÃO: Esta equipe está abaixo do limite populacional mínimo em ${minParam - totalCadastro} pessoas e pode receber novos pacientes para equilibrar a rede.` : ''}
+      
+      FOCO DA ANÁLISE: Dimensão Acompanhamento (70% do CVAT).
+      Estratégias prioritárias para grupos vulneráveis: Idosos e Crianças (pesos 1.2 a 2.5 no cálculo).
       
       Com base nisso, crie uma Matriz SWOT focada em 'Vínculo e Acompanhamento'.
-      ${needsRemapping ? "Inclua o indicativo de remapeamento e a necessidade de direcionar as pessoas excedentes para outras equipes." : ""}
+      ${needsRetirar ? "Inclua o indicativo de remapeamento e a necessidade de direcionar as pessoas excedentes para outras equipes." : ""}
       ${canReceive ? "Inclua a oportunidade de receber novos pacientes para atingir o parâmetro ideal e melhorar o vínculo territorial." : ""}
       Aponte Forças, Fraquezas, Oportunidades e Ameaças. 
-      Ao final, dê 3 dicas práticas de gestão para melhorar o índice.`;
+      Ao final, dê 3 dicas práticas de gestão especificamente para elevar a nota de acompanhamento desses grupos vulneráveis.`;
 
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
@@ -358,7 +431,7 @@ export default function App() {
       });
 
       setSwotAnalysis(response.text || 'Não foi possível gerar a análise.');
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
       setSwotAnalysis('Erro ao gerar análise. Tente novamente.');
     } finally {
@@ -366,16 +439,102 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || chatLoading) return;
+  const generateActionPlan = async () => {
+    if (!selectedTeam || data.length === 0) return;
+    
+    setPlanning(true);
+    try {
+      const ai = getAI();
+      const teamData = data.find(t => t['NOME DA EQUIPE'] === selectedTeam);
+      
+      const prompt = `Elabore um PLANO DE AÇÃO ESTRATÉGICO DE 30 DIAS para a equipe ${selectedTeam}.
+      Dados Atuais:
+      - Resultado CVAT: ${teamData?.['Resultado (CVAT)']}
+      - Classificação: ${teamData?.['Classificação (CVAT)']}
+      - Acompanhamento Atual: ${teamData?.['PESSOAS VINCULADAS E ACOMPANHADAS']}
+      
+      O plano deve ser dividido em 4 semanas e focar EXCLUSIVAMENTE em melhorar a Dimensão Acompanhamento (70% da nota), priorizando idosos, crianças e beneficiários de programas sociais (BPC/PBF).
+      
+      Estrutura do Plano:
+      Semana 1: Saneamento e Estratificação (Identificar quem falta acompanhar).
+      Semana 2: Operação Busca Ativa (Foco em microáreas silenciosas).
+      Semana 3: Qualificação do Registro (Garantir que a visita vire 'prática de cuidado').
+      Semana 4: Monitoramento e Feedback (Revisão dos espelhos de produção).
+      
+      Seja prático, use linguagem técnica da APS e cite a Nota Técnica 30/2025.`;
 
-    const userMessage = input.trim();
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: { systemInstruction: SYSTEM_INSTRUCTION }
+      });
+
+      setActionPlan(response.text || 'Não foi possível gerar o plano de ação.');
+    } catch (err: any) {
+      console.error(err);
+      setActionPlan('Erro ao gerar plano de ação. Tente novamente.');
+    } finally {
+      setPlanning(false);
+    }
+  };
+
+  const toggleTeamComparison = (teamName: string) => {
+    setSelectedTeamsForComparison(prev => 
+      prev.includes(teamName) 
+        ? prev.filter(t => t !== teamName)
+        : prev.length < 3 ? [...prev, teamName] : prev
+    );
+  };
+
+  const generateComparativeAnalysis = async () => {
+    if (selectedTeamsForComparison.length < 2) return;
+    
+    setComparing(true);
+    try {
+      const ai = getAI();
+      const teamsToCompare = data.filter(t => selectedTeamsForComparison.includes(t['NOME DA EQUIPE']));
+      
+      const prompt = `Realize uma análise comparativa detalhada entre as seguintes equipes de saúde:
+      ${teamsToCompare.map(t => `
+      Equipe: ${t['NOME DA EQUIPE']}
+      - Resultado CVAT: ${t['Resultado (CVAT)']}
+      - Classificação: ${t['Classificação (CVAT)']}
+      - Total Cadastro: ${t['Total Cadastro']}
+      - Pessoas Acompanhadas: ${t['PESSOAS VINCULADAS E ACOMPANHADAS']}
+      `).join('\n')}
+      
+      Com base na Nota Técnica 30/2025, identifique:
+      1. Qual equipe apresenta o melhor equilíbrio entre cadastro e acompanhamento.
+      2. Quais são os principais gargalos da equipe com menor desempenho em relação à líder do grupo.
+      3. Sugira uma estratégia de cooperação ou troca de boas práticas entre essas equipes.
+      4. Forneça 3 recomendações específicas para elevar o nível do grupo como um todo.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: { systemInstruction: SYSTEM_INSTRUCTION }
+      });
+
+      setComparativeAnalysis(response.text || 'Não foi possível gerar a análise comparativa.');
+    } catch (err: any) {
+      console.error(err);
+      setComparativeAnalysis('Erro ao gerar análise comparativa. Tente novamente.');
+    } finally {
+      setComparing(false);
+    }
+  };
+
+  const handleSendMessage = async (e?: React.FormEvent, customMessage?: string) => {
+    if (e) e.preventDefault();
+    const messageText = customMessage || input.trim();
+    if (!messageText || chatLoading) return;
+
     setInput('');
-    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+    setMessages(prev => [...prev, { role: 'user', content: messageText }]);
     setChatLoading(true);
 
     try {
+      const ai = getAI();
       const topTeam = data[0];
       const context = data.length > 0 
         ? `Contexto: O usuário é um profissional de saúde. O ranking atual mostra que a melhor equipe (${topTeam['NOME DA EQUIPE']}) tem nota ${topTeam['Resultado (CVAT)']}.`
@@ -383,12 +542,12 @@ export default function App() {
       
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: `${context}\n\nPergunta do usuário: ${userMessage}`,
+        contents: `${context}\n\nPergunta do usuário: ${messageText}`,
         config: { systemInstruction: SYSTEM_INSTRUCTION }
       });
 
       setMessages(prev => [...prev, { role: 'assistant', content: response.text || 'Desculpe, não consegui processar sua pergunta.' }]);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
       setMessages(prev => [...prev, { role: 'assistant', content: 'Ocorreu um erro ao consultar o assistente.' }]);
     } finally {
@@ -398,9 +557,8 @@ export default function App() {
 
   const filteredData = data.filter(item => {
     const matchesSearch = (item['NOME DA EQUIPE'] || '').toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesMonth = selectedMonth === 'Todos' || item['Mês'] === selectedMonth;
-    const matchesYear = selectedYear === 'Todos' || String(item['Ano']) === selectedYear;
-    return matchesSearch && matchesMonth && matchesYear;
+    const matchesCompetence = selectedCompetence === 'Todos' || item['Competência/Ano'] === selectedCompetence;
+    return matchesSearch && matchesCompetence;
   });
 
   const globalStats = {
@@ -413,8 +571,7 @@ export default function App() {
     }
   };
 
-  const uniqueMonths = Array.from(new Set(data.map(item => item['Mês']).filter(Boolean))).sort();
-  const uniqueYears = Array.from(new Set(data.map(item => String(item['Ano'])).filter(Boolean))).sort();
+  const uniqueCompetences = Array.from(new Set(data.map(item => item['Competência/Ano']).filter(Boolean))).sort().reverse();
 
   const top3 = data.slice(0, 3);
 
@@ -439,6 +596,13 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setShowManual(true)}
+              className="flex items-center gap-2 bg-white border-2 border-slate-100 hover:border-psf-blue text-slate-600 px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95"
+            >
+              <Info size={16} className="text-psf-blue" />
+              Manual
+            </button>
             <button 
               onClick={() => fileInputRef.current?.click()}
               className="flex items-center gap-2 bg-psf-blue hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md active:scale-95"
@@ -675,29 +839,16 @@ export default function App() {
                         <h2 className="text-sm font-black text-slate-800 uppercase tracking-[0.2em]">Ranking de Equipes</h2>
                       </div>
                       <div className="flex flex-wrap items-center gap-3">
-                        <div className="relative w-full md:w-40">
+                        <div className="relative w-full md:w-48">
                           <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
                           <select 
-                            value={selectedMonth}
-                            onChange={(e) => setSelectedMonth(e.target.value)}
+                            value={selectedCompetence}
+                            onChange={(e) => setSelectedCompetence(e.target.value)}
                             className="w-full bg-white border-2 border-slate-100 rounded-2xl pl-11 pr-4 py-2.5 text-xs font-bold text-slate-600 focus:outline-none focus:border-psf-blue transition-all shadow-sm appearance-none cursor-pointer"
                           >
-                            <option value="Todos">Mês: Todos</option>
-                            {uniqueMonths.map(m => (
-                              <option key={m} value={m}>{m}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="relative w-full md:w-32">
-                          <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-                          <select 
-                            value={selectedYear}
-                            onChange={(e) => setSelectedYear(e.target.value)}
-                            className="w-full bg-white border-2 border-slate-100 rounded-2xl pl-11 pr-4 py-2.5 text-xs font-bold text-slate-600 focus:outline-none focus:border-psf-blue transition-all shadow-sm appearance-none cursor-pointer"
-                          >
-                            <option value="Todos">Ano: Todos</option>
-                            {uniqueYears.map(y => (
-                              <option key={y} value={y}>{y}</option>
+                            <option value="Todos">Competência: Todas</option>
+                            {uniqueCompetences.map(c => (
+                              <option key={c} value={c}>{c}</option>
                             ))}
                           </select>
                         </div>
@@ -734,20 +885,24 @@ export default function App() {
                         <table className="w-full text-left border-collapse">
                           <thead>
                             <tr className="bg-slate-50/50 border-b border-slate-100">
+                              <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest w-10">
+                                <div className="flex items-center justify-center">
+                                  <ClipboardList size={14} />
+                                </div>
+                              </th>
                               <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Pos</th>
                               <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Equipe</th>
-                              <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Acompanhadas</th>
+                              <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Vinculadas/Acompanhadas</th>
                               <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Cadastro</th>
                               <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">
                                 <div className="flex items-center gap-1 group relative">
-                                  Limite Máximo
+                                  Parâmetro (Mínimo)
                                   <Info className="w-3 h-3 text-slate-300 cursor-help" />
                                   <div className="absolute bottom-full left-0 mb-2 px-2 py-1 bg-slate-900 text-white text-[8px] font-bold rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none normal-case tracking-normal">
-                                    Capacidade máxima permitida pela NT 30/2025
+                                    Parâmetro populacional mínimo conforme a NT 30/2025
                                   </div>
                                 </div>
                               </th>
-                              <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Parâmetro</th>
                               <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">CVAT</th>
                               <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
                             </tr>
@@ -756,8 +911,21 @@ export default function App() {
                             {filteredData.map((team, index) => (
                               <tr 
                                 key={team['NOME DA EQUIPE']} 
-                                className="border-b border-slate-50 hover:bg-slate-50/80 transition-colors cursor-default group"
+                                className={cn(
+                                  "border-b border-slate-50 hover:bg-slate-50/80 transition-colors cursor-default group",
+                                  selectedTeamsForComparison.includes(team['NOME DA EQUIPE']) && "bg-psf-blue/5"
+                                )}
                               >
+                                <td className="px-6 py-4">
+                                  <div className="flex items-center justify-center">
+                                    <input 
+                                      type="checkbox"
+                                      checked={selectedTeamsForComparison.includes(team['NOME DA EQUIPE'])}
+                                      onChange={() => toggleTeamComparison(team['NOME DA EQUIPE'])}
+                                      className="w-4 h-4 rounded border-slate-300 text-psf-blue focus:ring-psf-blue cursor-pointer"
+                                    />
+                                  </div>
+                                </td>
                                 <td className="px-6 py-4">
                                   <span className={cn(
                                     "w-7 h-7 flex items-center justify-center rounded-lg text-xs font-black shadow-sm",
@@ -771,24 +939,36 @@ export default function App() {
                                     <div className="font-bold text-slate-700">{team['NOME DA EQUIPE']}</div>
                                     {(() => {
                                       const total = Number(team['Total Cadastro']);
-                                      const limit = Number(team['Limite Normativo'] || team['PARÂMETRO POPULACIONAL']);
-                                      const diff = total - limit;
+                                      const minLimit = Number(team['Limite Normativo']);
+                                      const maxLimit = Number(team['Limite Máximo']);
                                       
-                                      if (diff > 0) {
+                                      if (total > maxLimit) {
+                                        const diff = total - maxLimit;
                                         return (
                                           <div className="group relative">
                                             <Map className="w-3.5 h-3.5 text-psf-red animate-pulse" />
                                             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-900 text-white text-[8px] font-bold rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
-                                              Retirar: {diff} pessoas (Excesso)
+                                              Retirar: {diff} pessoas (Excesso do Máximo)
                                             </div>
                                           </div>
                                         );
-                                      } else if (diff < 0) {
+                                      } else if (total >= maxLimit * 0.9) {
+                                        const remaining = maxLimit - total;
+                                        return (
+                                          <div className="group relative">
+                                            <Map className="w-3.5 h-3.5 text-amber-500" />
+                                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-900 text-white text-[8px] font-bold rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
+                                              Atenção: {remaining} vagas restantes (Próximo ao Limite)
+                                            </div>
+                                          </div>
+                                        );
+                                      } else if (total < minLimit) {
+                                        const diff = minLimit - total;
                                         return (
                                           <div className="group relative">
                                             <Map className="w-3.5 h-3.5 text-emerald-500" />
                                             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-900 text-white text-[8px] font-bold rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
-                                              Receber: {Math.abs(diff)} pessoas (Vaga)
+                                              Receber: {diff} pessoas (Abaixo do Mínimo)
                                             </div>
                                           </div>
                                         );
@@ -799,7 +979,7 @@ export default function App() {
                                   <div className="text-[10px] text-slate-400 font-medium uppercase tracking-tighter">Unidade de Saúde da Família</div>
                                 </td>
                                 <td className="px-6 py-4">
-                                  <div className="text-xs font-bold text-slate-600">{team['Pessoas Acompanhadas']}</div>
+                                  <div className="text-xs font-bold text-slate-600">{team['PESSOAS VINCULADAS E ACOMPANHADAS']}</div>
                                 </td>
                                 <td className="px-6 py-4">
                                   <div className="text-xs font-bold text-slate-600">{team['Total Cadastro']}</div>
@@ -809,9 +989,6 @@ export default function App() {
                                     <span className="text-xs font-black text-psf-blue">{team['Limite Normativo']}</span>
                                     <span className="text-[8px] text-slate-400 font-bold uppercase tracking-tighter">Pessoas</span>
                                   </div>
-                                </td>
-                                <td className="px-6 py-4">
-                                  <div className="text-xs font-bold text-slate-600">{team['PARÂMETRO POPULACIONAL']}</div>
                                 </td>
                                 <td className="px-6 py-4">
                                   <div className="flex items-center gap-3">
@@ -833,6 +1010,81 @@ export default function App() {
                         </table>
                       </div>
                     </div>
+
+                    {/* Comparison Section */}
+                    <AnimatePresence>
+                      {selectedTeamsForComparison.length >= 2 && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="space-y-6 overflow-hidden"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <RefreshCw className="text-psf-blue animate-spin-slow" />
+                              <h2 className="text-sm font-black text-slate-800 uppercase tracking-[0.2em]">Comparativo de Equipes</h2>
+                            </div>
+                            <button 
+                              onClick={() => setSelectedTeamsForComparison([])}
+                              className="text-[10px] font-black text-psf-red uppercase tracking-widest hover:underline"
+                            >
+                              Limpar Seleção
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="glass-card p-6 space-y-6">
+                              <div className="space-y-4">
+                                {data.filter(t => selectedTeamsForComparison.includes(t['NOME DA EQUIPE'])).map(team => (
+                                  <div key={team['NOME DA EQUIPE']} className="space-y-2">
+                                    <div className="flex justify-between items-end">
+                                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">{team['NOME DA EQUIPE']}</span>
+                                      <span className="text-sm font-black text-slate-800">{team['Resultado (CVAT)']}</span>
+                                    </div>
+                                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                                      <motion.div 
+                                        initial={{ width: 0 }}
+                                        animate={{ width: `${(team['Resultado (CVAT)'] / 10) * 100}%` }}
+                                        className="h-full bg-psf-blue"
+                                      />
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+
+                              <button
+                                onClick={generateComparativeAnalysis}
+                                disabled={comparing}
+                                className="w-full bg-psf-blue text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-black transition-all shadow-lg flex items-center justify-center gap-3 disabled:opacity-50"
+                              >
+                                {comparing ? (
+                                  <>
+                                    <Loader2 className="animate-spin" size={18} />
+                                    Analisando...
+                                  </>
+                                ) : (
+                                  <>
+                                    <TrendingUp size={18} />
+                                    Gerar Análise Comparativa
+                                  </>
+                                )}
+                              </button>
+                            </div>
+
+                            <div className="glass-card p-6 bg-slate-900 text-white border-none">
+                              <div className="flex items-center gap-2 mb-4">
+                                <div className="w-1.5 h-4 bg-psf-green rounded-full" />
+                                <h4 className="text-[10px] font-black uppercase tracking-widest text-psf-green">Insights do Mentor</h4>
+                              </div>
+                              <div className="text-xs leading-relaxed text-slate-300 whitespace-pre-wrap max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+                                {comparativeAnalysis || "Selecione as equipes e clique em 'Gerar Análise Comparativa' para obter insights estratégicos sobre as diferenças de desempenho."}
+                              </div>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
 
                   {/* Sidebar: SWOT & Chat */}
@@ -862,32 +1114,53 @@ export default function App() {
                         {selectedTeam && (() => {
                           const team = data.find(t => t['NOME DA EQUIPE'] === selectedTeam);
                           const total = Number(team?.['Total Cadastro'] || 0);
-                          const param = Number(team?.['Limite Normativo'] || team?.['PARÂMETRO POPULACIONAL'] || 0);
-                          const needsRemap = total > param;
-                          const excess = total - param;
+                          const minParam = Number(team?.['Limite Normativo'] || 0);
+                          const maxParam = Number(team?.['Limite Máximo'] || 0);
 
                           return (
-                            <div className="space-y-3">
-                              <div className="grid grid-cols-2 gap-3">
-                                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Acompanhadas</p>
-                                  <p className="text-sm font-black text-slate-800">{team?.['Pessoas Acompanhadas']}</p>
-                                </div>
-                                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Cadastro</p>
-                                  <p className="text-sm font-black text-slate-800">{total}</p>
-                                </div>
-                                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Limite Máximo</p>
-                                  <p className="text-sm font-black text-psf-blue">{param}</p>
-                                </div>
-                                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Resultado CVAT</p>
-                                  <p className="text-sm font-black text-psf-blue">{team?.['Resultado (CVAT)']}</p>
-                                </div>
+                            <div className="space-y-4">
+                              <div className="grid grid-cols-1 gap-2">
+                                {[
+                                  { label: 'Parâmetro Mínimo', key: 'Limite Normativo' },
+                                  { label: 'Parâmetro Máximo', key: 'Limite Máximo' },
+                                  { label: 'Cadastro Individual', key: 'CADASTRO INDIVIDUAL' },
+                                  { label: 'Individual + Domiciliar', key: 'CADASTRO INDIVIDUAL E CADASTRO DOMICILIAR' },
+                                  { label: 'Somente Indiv./Territ.', key: 'PESSOAS COM SOMENTE CADASTRO INDIVIDUAL OU TERRITORIAL' },
+                                  { label: 'Vinculadas/Acompanhadas', key: 'PESSOAS VINCULADAS E ACOMPANHADAS' },
+                                  { label: 'Acomp. s/ Vulnerabilidade', key: 'PESSOA ACOMPANHADA SEM CRITÉRIO DE VULNERABILIDADE' },
+                                  { label: 'Beneficiário BPC/PBF', key: 'BENEFICIÁRIO BPC OU PBF' },
+                                  { label: 'Criança Acompanhada', key: 'CRIANÇA ACOMPANHADA' },
+                                  { label: 'Criança BPC/PBF', key: 'CRIANÇA BENEFICIÁRIA BPC OU PBF' },
+                                  { label: 'Idoso Acompanhado', key: 'PESSOA IDOSA ACOMPANHADA' },
+                                  { label: 'Idoso BPC/PBF', key: 'PESSOA IDOSA BENEFICIÁRIA BPC OU PBF' },
+                                  { label: 'Resultado (CVAT)', key: 'Resultado (CVAT)', isHighlight: true },
+                                  { label: 'Classificação (CVAT)', key: 'Classificação (CVAT)', isHighlight: true }
+                                ].map((metric) => (
+                                  <button
+                                    key={metric.key}
+                                    onClick={() => {
+                                      const val = team?.[metric.key];
+                                      setInput(`Me explique o indicador "${metric.label}" da equipe ${selectedTeam}, que atualmente está em ${val}.`);
+                                    }}
+                                    className={cn(
+                                      "flex items-center justify-between p-3 rounded-xl border transition-all text-left hover:scale-[1.02] active:scale-95",
+                                      metric.isHighlight 
+                                        ? "bg-psf-blue/5 border-psf-blue/20 hover:bg-psf-blue/10" 
+                                        : "bg-slate-50 border-slate-100 hover:bg-slate-100"
+                                    )}
+                                  >
+                                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight">{metric.label}</span>
+                                    <span className={cn(
+                                      "text-xs font-black",
+                                      metric.isHighlight ? "text-psf-blue" : "text-slate-800"
+                                    )}>
+                                      {team?.[metric.key] || '0'}
+                                    </span>
+                                  </button>
+                                ))}
                               </div>
                               
-                              {needsRemap && (
+                              {total > maxParam && (
                                 <div className="bg-psf-red/5 border border-psf-red/20 p-3 rounded-xl flex items-start gap-3">
                                   <div className="bg-psf-red/10 p-2 rounded-lg">
                                     <Map className="text-psf-red w-4 h-4" />
@@ -895,13 +1168,13 @@ export default function App() {
                                   <div>
                                     <p className="text-[10px] font-black text-psf-red uppercase tracking-widest">Remapeamento: Retirar</p>
                                     <p className="text-xs font-bold text-slate-700 mt-0.5">
-                                      Excesso de {excess} pessoas.
+                                      Excesso de {total - maxParam} pessoas.
                                     </p>
                                   </div>
                                 </div>
                               )}
 
-                              {total < param && (
+                              {total < minParam && (
                                 <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-xl flex items-start gap-3">
                                   <div className="bg-emerald-100 p-2 rounded-lg">
                                     <Map className="text-emerald-600 w-4 h-4" />
@@ -909,7 +1182,7 @@ export default function App() {
                                   <div>
                                     <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">Remapeamento: Receber</p>
                                     <p className="text-xs font-bold text-slate-700 mt-0.5">
-                                      Vaga para {param - total} pessoas.
+                                      Vaga para {minParam - total} pessoas.
                                     </p>
                                   </div>
                                 </div>
@@ -936,6 +1209,24 @@ export default function App() {
                           )}
                         </button>
 
+                        <button 
+                          onClick={generateActionPlan}
+                          disabled={planning}
+                          className="w-full flex items-center justify-center gap-2 bg-white border-2 border-emerald-100 hover:border-emerald-500 text-emerald-700 py-3 rounded-2xl text-xs font-black uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50"
+                        >
+                          {planning ? (
+                            <>
+                              <Loader2 className="animate-spin" size={18} />
+                              Planejando...
+                            </>
+                          ) : (
+                            <>
+                              <ClipboardList size={18} />
+                              Gerar Plano de Ação (30 Dias)
+                            </>
+                          )}
+                        </button>
+
                         {swotAnalysis && (
                           <motion.div 
                             initial={{ opacity: 0, y: 10 }}
@@ -948,6 +1239,22 @@ export default function App() {
                             </div>
                             <div className="text-[11px] text-slate-600 leading-relaxed whitespace-pre-wrap max-h-80 overflow-y-auto pr-3 custom-scrollbar font-medium">
                               {swotAnalysis}
+                            </div>
+                          </motion.div>
+                        )}
+
+                        {actionPlan && (
+                          <motion.div 
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="p-5 bg-emerald-50 rounded-2xl border border-emerald-100"
+                          >
+                            <div className="flex items-center gap-2 mb-3">
+                              <div className="w-1.5 h-4 bg-emerald-500 rounded-full" />
+                              <h4 className="text-xs font-black text-emerald-800 uppercase tracking-widest">Plano de Recuperação</h4>
+                            </div>
+                            <div className="text-[11px] text-emerald-900 leading-relaxed whitespace-pre-wrap max-h-80 overflow-y-auto pr-3 custom-scrollbar font-medium">
+                              {actionPlan}
                             </div>
                           </motion.div>
                         )}
@@ -986,11 +1293,31 @@ export default function App() {
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-white/50">
                   {messages.length === 0 && (
-                    <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
-                      <div className="bg-psf-blue/10 p-4 rounded-full">
-                        <Users className="text-psf-blue w-8 h-8" />
+                    <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-6">
+                      <div className="space-y-3">
+                        <div className="bg-psf-blue/10 p-4 rounded-full w-fit mx-auto">
+                          <Users className="text-psf-blue w-8 h-8" />
+                        </div>
+                        <p className="text-xs text-slate-500 font-medium">Olá! Sou seu mentor de gestão. Como posso ajudar com os índices da sua equipe hoje?</p>
                       </div>
-                      <p className="text-xs text-slate-500 font-medium">Olá! Sou seu mentor de gestão. Como posso ajudar com os índices da sua equipe hoje?</p>
+
+                      <div className="w-full space-y-2">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Sugestões de Perguntas</p>
+                        {[
+                          "Como melhorar o CVAT de idosos?",
+                          "O que conta como 'prática de cuidado'?",
+                          "Como funciona o peso 2.5 para BPC/PBF?",
+                          "Dicas para remapeamento de excesso"
+                        ].map((q, i) => (
+                          <button
+                            key={i}
+                            onClick={() => handleSendMessage(undefined, q)}
+                            className="w-full text-left p-3 bg-white border border-slate-100 rounded-xl text-[10px] text-slate-600 hover:border-psf-blue hover:text-psf-blue transition-all shadow-sm active:scale-[0.98]"
+                          >
+                            {q}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
                   {messages.map((msg, i) => (
@@ -1034,6 +1361,132 @@ export default function App() {
           </>
         )}
       </main>
+
+      {/* Manual Modal */}
+      <AnimatePresence>
+        {showManual && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-white w-full max-w-2xl rounded-[32px] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+            >
+              <div className="bg-psf-blue p-8 text-white flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="bg-white/20 p-3 rounded-2xl">
+                    <FileText size={24} />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-black uppercase tracking-widest">Manual do Painel SIAPS 360</h2>
+                    <p className="text-white/70 text-xs font-bold uppercase tracking-tighter">Guia de Operação e Gestão Estratégica</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowManual(false)}
+                  className="bg-white/10 hover:bg-white/20 p-2 rounded-xl transition-colors"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
+                <section className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-4 bg-psf-blue rounded-full" />
+                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">1. Importação e Dados</h3>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Carregue seu relatório SIAPS em formato <strong>CSV</strong> ou vincule uma <strong>Google Sheets</strong> (Publicada na Web como CSV). O sistema processará automaticamente os dados de vínculo e acompanhamento, calculando o <strong>CVAT</strong> conforme a Nota Técnica 30/2025.
+                  </p>
+                </section>
+
+                <section className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-4 bg-psf-green rounded-full" />
+                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">2. Alertas de Remapeamento</h3>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex gap-3">
+                      <Map className="text-psf-red shrink-0" size={20} />
+                      <div>
+                        <h4 className="text-[10px] font-black text-psf-red uppercase mb-1">Excesso (Retirar)</h4>
+                        <p className="text-[10px] text-slate-500 font-medium">Equipe acima do limite máximo. Necessita redistribuir pacientes.</p>
+                      </div>
+                    </div>
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex gap-3">
+                      <Map className="text-amber-500 shrink-0" size={20} />
+                      <div>
+                        <h4 className="text-[10px] font-black text-amber-500 uppercase mb-1">Atenção (Próximo)</h4>
+                        <p className="text-[10px] text-slate-500 font-medium">Equipe próxima do limite máximo (90%+). Planeje o remapeamento.</p>
+                      </div>
+                    </div>
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex gap-3">
+                      <Map className="text-emerald-500 shrink-0" size={20} />
+                      <div>
+                        <h4 className="text-[10px] font-black text-emerald-500 uppercase mb-1">Déficit (Receber)</h4>
+                        <p className="text-[10px] text-slate-500 font-medium">Equipe abaixo do limite mínimo. Oportunidade para novos cadastros.</p>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-4 bg-psf-blue rounded-full" />
+                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">3. Inteligência Artificial (IA)</h3>
+                  </div>
+                  <div className="space-y-3">
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      O <strong>Mentor SIAPS 360</strong> utiliza IA para fornecer insights estratégicos:
+                    </p>
+                    <ul className="text-xs text-slate-600 space-y-2 list-disc pl-4">
+                      <li><strong>Matriz SWOT:</strong> Análise de Forças, Fraquezas, Oportunidades e Ameaças para cada equipe.</li>
+                      <li><strong>Plano de Ação (30 Dias):</strong> Roteiro prático semanal para melhorar o acompanhamento de vulneráveis.</li>
+                      <li><strong>Análise Comparativa:</strong> Selecione até 3 equipes para identificar gargalos e melhores práticas entre elas.</li>
+                      <li><strong>Chat Mentor:</strong> Converse diretamente com a IA para tirar dúvidas sobre a Nota Técnica 30/2025.</li>
+                    </ul>
+                  </div>
+                </section>
+
+                <section className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-4 bg-psf-green rounded-full" />
+                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">4. Matriz SWOT e Mentor</h3>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    No painel lateral, selecione uma equipe para gerar uma <strong>Matriz SWOT</strong> focada em acompanhamento de vulneráveis. Use o chat flutuante (ícone azul no canto inferior) para conversar com o <strong>Mentor SIAPS 360</strong>.
+                  </p>
+                </section>
+
+                <div className="bg-psf-red/5 p-6 rounded-[24px] border border-psf-red/10">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertCircle className="text-psf-red" size={16} />
+                    <h4 className="text-[10px] font-black text-psf-red uppercase tracking-widest">Atenção: Versão Pública</h4>
+                  </div>
+                  <p className="text-[10px] text-psf-red/80 font-bold leading-relaxed">
+                    As ferramentas de IA estão integradas e prontas para uso. O Mentor SIAPS 360 utiliza a inteligência do Google Gemini para auxiliar na sua gestão.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-8 bg-slate-50 border-t border-slate-100">
+                <button 
+                  onClick={() => setShowManual(false)}
+                  className="w-full bg-psf-blue text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-black transition-all shadow-lg"
+                >
+                  Entendi, vamos começar!
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <style>{`
         .custom-scrollbar::-webkit-scrollbar {
