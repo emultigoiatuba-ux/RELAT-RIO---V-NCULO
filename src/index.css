@@ -54,3 +54,49 @@
 .tab-active {
   @apply border-b-2 border-psf-blue text-psf-blue;
 }
+
+/* Markdown Chat Styles */
+.markdown-body {
+  @apply text-xs leading-relaxed;
+}
+
+.markdown-body p {
+  @apply mb-2 last:mb-0;
+}
+
+.markdown-body a {
+  @apply text-psf-blue underline hover:text-blue-700 transition-colors;
+}
+
+.markdown-body ul, .markdown-body ol {
+  @apply mb-2 pl-4;
+}
+
+.markdown-body ul {
+  @apply list-disc;
+}
+
+.markdown-body ol {
+  @apply list-decimal;
+}
+
+.markdown-body li {
+  @apply mb-1;
+}
+
+.markdown-body strong {
+  @apply font-bold text-slate-900;
+}
+
+.typing-dot {
+  @apply w-1.5 h-1.5 bg-psf-blue/40 rounded-full inline-block mx-0.5;
+  animation: typing 1.4s infinite ease-in-out;
+}
+
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typing {
+  0%, 80%, 100% { transform: scale(0); }
+  40% { transform: scale(1); }
+}

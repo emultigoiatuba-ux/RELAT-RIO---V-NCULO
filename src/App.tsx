@@ -4,8 +4,9 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import Papa from 'papaparse';
+import ReactMarkdown from 'react-markdown';
 import { 
   Trophy, 
   Upload, 
@@ -31,7 +32,9 @@ import {
   User,
   X,
   Calendar,
-  Map
+  Map,
+  Key,
+  Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SIAPSData, Message } from './types';
@@ -47,27 +50,43 @@ declare global {
   }
 }
 
-const SYSTEM_INSTRUCTION = `Você é um Consultor Especialista em Gestão da Atenção Primária à Saúde, com profundo conhecimento da Nota Técnica Nº 30/2025-CGESCO/DESCO/SAPS/MS. 
+const SYSTEM_INSTRUCTION = `Você é um Consultor Especialista em Gestão da Atenção Primária à Saúde, com profundo conhecimento da Portaria GM/MS nº 3.493/2024 e da Nota Técnica Nº 30/2025-CGESCO/DESCO/SAPS/MS.
 
-Seu objetivo é analisar os dados do SIAPS (vínculo e acompanhamento) e fornecer orientações práticas baseadas na metodologia oficial:
+Seu objetivo é analisar os dados do SIAPS (vínculo e acompanhamento) e fornecer orientações estratégicas baseadas na metodologia oficial do novo cofinanciamento da APS:
 
 1. **Metodologia de Cálculo (CVAT)**:
-   - **Dimensão Cadastro (30%)**: Valoriza a completude. Fator 0.75 para cadastro individual (MICI) e 1.5 para cadastro completo (MICI + Domiciliar/Territorial - MICDT). O 'Total Cadastro' é a soma de MICI e MICDT. Cadastros devem estar atualizados nos últimos 24 meses.
-   - **Dimensão Acompanhamento (70%)**: Foca na continuidade do cuidado (mais de um contato em 12 meses, sendo pelo menos um 'prática de cuidado'). Pesos de vulnerabilidade: Idoso/Criança (1.2), BPC/PBF (1.3), Ambos (2.5).
-   - **Satisfação do Usuário**: Pontuação extra (0.15 a 0.30) para equipes com avaliações no app 'Meu SUS Digital'.
+   - **Dimensão Cadastro (30%)**: Peso de 3 pontos no escore final.
+     - Fator 0.75 para Cadastro Individual (MICI).
+     - Fator 1.5 para Cadastro Completo (MICI + Domiciliar/Territorial - MICDT).
+     - Cadastros devem estar atualizados nos últimos 24 meses.
+     - Escore X: >85% (3.0 pts), 65-84.9% (2.25 pts), 45-64.9% (1.5 pts), <45% (0.75 pts).
+   - **Dimensão Acompanhamento (70%)**: Peso de 7 pontos no escore final.
+     - Foca na continuidade do cuidado (mais de um contato em 12 meses, com pelo menos uma 'prática de cuidado').
+     - Pesos de Vulnerabilidade:
+       - Sem critérios: 1.0
+       - Pessoa Idosa (60+) ou Criança (0-5 anos incompletos): 1.2
+       - Beneficiário de BPC ou PBF: 1.3
+       - Idoso/Criança + BPC/PBF: 2.5
+     - Escore Y: >85% (7.0 pts), 65-84.9% (5.25 pts), 45-64.9% (3.5 pts), <45% (1.75 pts).
+   - **Satisfação do Usuário (Bônus)**: Pontuação extra de 0.15 (se <5% avaliados) ou 0.30 (se >=5% avaliados) baseada no app 'Meu SUS Digital'.
 
-2. **Suas Tarefas**:
-   - Analisar o Resultado (CVAT) e Classificação da equipe.
-   - Gerar uma Matriz SWOT focada em Vínculo e Territorialização.
-   - Sugerir 3 ações imediatas baseadas nos critérios da Nota Técnica (ex: qualificação de cadastros incompletos, busca ativa de vulneráveis, incentivo ao uso do Meu SUS Digital).
-   - **Levantamento Nominal**: Se o usuário fornecer uma lista de CPFs ou cidadãos, ajude a identificar quem precisa de acompanhamento prioritário com base nos critérios de vulnerabilidade.
+2. **Classificação Final**:
+   - Ótimo: > 8.5
+   - Bom: 7.0 a 8.5
+   - Suficiente: 5.0 a 6.9
+   - Regular: < 5.0
 
-3. **Busca Ativa Estratégica**:
-   - Quando questionado sobre como melhorar a busca ativa, forneça orientações detalhadas para identificar e priorizar cidadãos em vulnerabilidade: Idosos (60+), Crianças (0-12), Beneficiários de BPC/PBF e Gestantes.
-   - **Estratégias de Priorização**: Utilize o levantamento nominal para identificar cidadãos que não tiveram pelo menos um contato de 'prática de cuidado' nos últimos 12 meses.
-   - **Foco no Resultado**: Explique que o acompanhamento desses grupos vulneráveis possui pesos diferenciados (1.2 a 2.5), o que potencializa significativamente a Dimensão Acompanhamento (70% do CVAT).
+3. **Suas Tarefas**:
+   - Analisar o Resultado (CVAT) e identificar gargalos (ex: muitos cadastros sem MICDT, baixo acompanhamento de vulneráveis).
+   - Gerar Matriz SWOT focada em Vínculo e Territorialização.
+   - Sugerir ações práticas (ex: busca ativa de idosos/crianças beneficiários de PBF para maximizar o peso 2.5).
+   - Orientar sobre a qualificação dos registros no Siaps para evitar glosas ou subestimação de indicadores.
 
-Use uma linguagem acolhedora, técnica e motivadora. Explique que o cadastro territorializa e identifica, enquanto o acompanhamento consolida a continuidade do cuidado.`;
+4. **Contexto Legal**:
+   - Baseie-se sempre na Portaria GM/MS nº 3.493/2024 (https://bvsms.saude.gov.br/bvs/saudelegis/gm/2024/prt3493_11_04_2024.html) que institui o novo modelo de financiamento baseado em desempenho e vínculo.
+   - Explique que o cadastro territorializa e identifica, enquanto o acompanhamento consolida a continuidade do cuidado.
+
+Use uma linguagem técnica, porém acessível e motivadora para gestores e equipes de saúde.`;
 
 const getParametroMinimo = (porte: number, teamName: string) => {
   const name = teamName.toUpperCase();
@@ -162,21 +181,78 @@ export default function App() {
   const [comparativeAnalysis, setComparativeAnalysis] = useState<string | null>(null);
   const [comparing, setComparing] = useState(false);
   const [showManual, setShowManual] = useState(false);
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+  const [testResult, setTestResult] = useState<string | null>(null);
   
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const getAI = () => {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error('Chave API do Gemini não configurada. Verifique as configurações do ambiente.');
+    // Use the system key by default, allow user override if they have one
+    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+    
+    if (!apiKey || apiKey === 'undefined' || apiKey === '') {
+      throw new Error('API_KEY_MISSING');
     }
     return new GoogleGenAI({ apiKey });
   };
 
+  const MODEL_NAME = "gemini-3-flash-preview";
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const testAIConnection = async () => {
+    setTestStatus('testing');
+    setTestResult(null);
+    try {
+      const ai = getAI();
+      const response = await ai.models.generateContent({
+        model: MODEL_NAME,
+        contents: "Responda apenas: 'Conexão estabelecida com sucesso usando o modelo " + MODEL_NAME + ".'",
+        config: { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } }
+      });
+      setTestResult(response.text || 'Sem resposta do modelo.');
+      setTestStatus('success');
+    } catch (err: any) {
+      console.error(err);
+      let errorMsg = err.message || 'Erro desconhecido na conexão.';
+      
+      // Try to parse JSON error if it's a string
+      try {
+        if (errorMsg.includes('{')) {
+          const jsonError = JSON.parse(errorMsg.substring(errorMsg.indexOf('{')));
+          if (jsonError.error?.message) {
+            errorMsg = jsonError.error.message;
+          }
+        }
+      } catch (e) {
+        // Fallback to original message
+      }
+
+      if (errorMsg.includes('API key not valid') || errorMsg.includes('400')) {
+        setTestResult('A chave API atual é inválida. Por favor, use o botão "Configurar Chave" abaixo para selecionar uma chave válida.');
+      } else {
+        setTestResult(`Erro: ${errorMsg}`);
+      }
+      setTestStatus('error');
+    }
+  };
+
+  const handleOpenSelectKey = async () => {
+    try {
+      if (window.aistudio?.openSelectKey) {
+        await window.aistudio.openSelectKey();
+        setTestStatus('idle');
+        setTestResult('Nova chave selecionada. Por favor, teste a conexão novamente.');
+      } else {
+        alert('Interface de seleção de chave não disponível neste ambiente.');
+      }
+    } catch (err) {
+      console.error('Erro ao abrir seletor de chave:', err);
+    }
+  };
 
   const fetchFromGoogleSheets = async () => {
     if (!sheetUrl) return;
@@ -434,15 +510,25 @@ export default function App() {
       Ao final, dê 3 dicas práticas de gestão especificamente para elevar a nota de acompanhamento desses grupos vulneráveis.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
+        model: MODEL_NAME,
         contents: prompt,
-        config: { systemInstruction: SYSTEM_INSTRUCTION }
+        config: { 
+          systemInstruction: SYSTEM_INSTRUCTION,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL }
+        }
       });
 
       setSwotAnalysis(response.text || 'Não foi possível gerar a análise.');
     } catch (err: any) {
       console.error(err);
-      setSwotAnalysis(`Erro ao gerar análise: ${err.message || 'Tente novamente.'}`);
+      const errorMsg = err.message || '';
+      if (errorMsg === 'API_KEY_MISSING' || errorMsg.includes('Requested entity was not found') || errorMsg.includes('API key not valid') || errorMsg.includes('400')) {
+        setSwotAnalysis(`Erro: Chave API inválida ou não autorizada para o modelo ${MODEL_NAME}. Por favor, abra o "Manual" e use o botão "Configurar Chave" para selecionar uma chave válida.`);
+      } else if (errorMsg.includes('quota') || errorMsg.includes('429')) {
+        setSwotAnalysis(`Erro: Limite de uso atingido (Quota). Tente novamente em alguns instantes.`);
+      } else {
+        setSwotAnalysis(`Erro ao gerar análise: ${errorMsg || 'Tente novamente.'}`);
+      }
     } finally {
       setAnalyzing(false);
     }
@@ -473,15 +559,25 @@ export default function App() {
       Seja prático, use linguagem técnica da APS e cite a Nota Técnica 30/2025.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
+        model: MODEL_NAME,
         contents: prompt,
-        config: { systemInstruction: SYSTEM_INSTRUCTION }
+        config: { 
+          systemInstruction: SYSTEM_INSTRUCTION,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL }
+        }
       });
 
       setActionPlan(response.text || 'Não foi possível gerar o plano de ação.');
     } catch (err: any) {
       console.error(err);
-      setActionPlan(`Erro ao gerar plano de ação: ${err.message || 'Tente novamente.'}`);
+      const errorMsg = err.message || '';
+      if (errorMsg === 'API_KEY_MISSING' || errorMsg.includes('Requested entity was not found') || errorMsg.includes('API key not valid') || errorMsg.includes('400')) {
+        setActionPlan(`Erro: Chave API inválida ou não autorizada para o modelo ${MODEL_NAME}. Por favor, abra o "Manual" e use o botão "Configurar Chave" para selecionar uma chave válida.`);
+      } else if (errorMsg.includes('quota') || errorMsg.includes('429')) {
+        setActionPlan(`Erro: Limite de uso atingido (Quota). Tente novamente em alguns instantes.`);
+      } else {
+        setActionPlan(`Erro ao gerar plano de ação: ${errorMsg || 'Tente novamente.'}`);
+      }
     } finally {
       setPlanning(false);
     }
@@ -519,15 +615,25 @@ export default function App() {
       4. Forneça 3 recomendações específicas para elevar o nível do grupo como um todo.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.1-flash-latest",
+        model: MODEL_NAME,
         contents: prompt,
-        config: { systemInstruction: SYSTEM_INSTRUCTION }
+        config: { 
+          systemInstruction: SYSTEM_INSTRUCTION,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL }
+        }
       });
 
       setComparativeAnalysis(response.text || 'Não foi possível gerar a análise comparativa.');
     } catch (err: any) {
       console.error(err);
-      setComparativeAnalysis(`Erro ao gerar análise comparativa: ${err.message || 'Tente novamente.'}`);
+      const errorMsg = err.message || '';
+      if (errorMsg === 'API_KEY_MISSING' || errorMsg.includes('Requested entity was not found') || errorMsg.includes('API key not valid') || errorMsg.includes('400')) {
+        setComparativeAnalysis(`Erro: Chave API inválida ou não autorizada para o modelo ${MODEL_NAME}. Por favor, abra o "Manual" e use o botão "Configurar Chave" para selecionar uma chave válida.`);
+      } else if (errorMsg.includes('quota') || errorMsg.includes('429')) {
+        setComparativeAnalysis(`Erro: Limite de uso atingido (Quota). Tente novamente em alguns instantes.`);
+      } else {
+        setComparativeAnalysis(`Erro ao gerar análise comparativa: ${errorMsg || 'Tente novamente.'}`);
+      }
     } finally {
       setComparing(false);
     }
@@ -550,15 +656,27 @@ export default function App() {
         : '';
       
       const response = await ai.models.generateContent({
-        model: "gemini-3.1-flash-latest",
+        model: MODEL_NAME,
         contents: `${context}\n\nPergunta do usuário: ${messageText}`,
-        config: { systemInstruction: SYSTEM_INSTRUCTION }
+        config: { 
+          systemInstruction: SYSTEM_INSTRUCTION,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL }
+        }
       });
 
       setMessages(prev => [...prev, { role: 'assistant', content: response.text || 'Desculpe, não consegui processar sua pergunta.' }]);
     } catch (err: any) {
       console.error(err);
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Ocorreu um erro ao consultar o assistente.' }]);
+      const errorMsg = err.message || '';
+      let errorText = 'Desculpe, ocorreu um erro ao processar sua mensagem.';
+      
+      if (errorMsg === 'API_KEY_MISSING' || errorMsg.includes('Requested entity was not found') || errorMsg.includes('API key not valid') || errorMsg.includes('400')) {
+        errorText = `Erro: Chave API inválida ou não autorizada para o modelo ${MODEL_NAME}. Por favor, abra o "Manual" e use o botão "Configurar Chave" para selecionar uma chave válida.`;
+      } else if (errorMsg.includes('quota') || errorMsg.includes('429')) {
+        errorText = 'Erro: Limite de uso (quota) atingido. Por favor, aguarde um momento.';
+      }
+
+      setMessages(prev => [...prev, { role: 'assistant', content: errorText }]);
     } finally {
       setChatLoading(false);
     }
@@ -611,13 +729,6 @@ export default function App() {
             >
               <Info size={16} className="text-psf-blue" />
               Manual
-            </button>
-            <button 
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 bg-psf-blue hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md active:scale-95"
-            >
-              <Upload size={16} />
-              Importar CSV
             </button>
             <input 
               type="file" 
@@ -1339,12 +1450,20 @@ export default function App() {
                           : "bg-white text-slate-700 mr-auto rounded-tl-none shadow-sm border border-slate-100"
                       )}
                     >
-                      {msg.content}
+                      {msg.role === 'assistant' ? (
+                        <div className="markdown-body">
+                          <ReactMarkdown>{msg.content}</ReactMarkdown>
+                        </div>
+                      ) : (
+                        msg.content
+                      )}
                     </div>
                   ))}
                   {chatLoading && (
-                    <div className="bg-white text-slate-700 mr-auto p-4 rounded-2xl rounded-tl-none text-xs shadow-sm border border-slate-100">
-                      <Loader2 className="animate-spin" size={16} />
+                    <div className="bg-white text-slate-700 mr-auto p-4 rounded-2xl rounded-tl-none text-xs shadow-sm border border-slate-100 flex items-center gap-1">
+                      <div className="typing-dot"></div>
+                      <div className="typing-dot"></div>
+                      <div className="typing-dot"></div>
                     </div>
                   )}
                   <div ref={chatEndRef} />
@@ -1405,6 +1524,65 @@ export default function App() {
               </div>
 
               <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
+                <section className="space-y-4 bg-slate-50 p-6 rounded-[32px] border-2 border-slate-100">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="bg-psf-blue/10 p-2 rounded-xl text-psf-blue">
+                      <Zap size={20} />
+                    </div>
+                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Status do Sistema IA</h3>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Verifique se o motor de inteligência <strong>{MODEL_NAME}</strong> está ativo e respondendo corretamente às diretrizes da Portaria 3.493/2024.
+                  </p>
+                  
+                  <div className="flex flex-col gap-3 pt-2">
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={testAIConnection}
+                        disabled={testStatus === 'testing'}
+                        className={`flex-1 flex items-center justify-center gap-3 px-4 py-3 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all shadow-md active:scale-95 ${
+                          testStatus === 'testing' ? 'bg-slate-400 text-white cursor-not-allowed' :
+                          testStatus === 'success' ? 'bg-emerald-500 text-white hover:bg-emerald-600' :
+                          testStatus === 'error' ? 'bg-rose-500 text-white hover:bg-rose-600' :
+                          'bg-psf-blue text-white hover:bg-blue-700'
+                        }`}
+                      >
+                        {testStatus === 'testing' ? (
+                          <>
+                            <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            Testando...
+                          </>
+                        ) : (
+                          <>
+                            <Zap size={14} />
+                            Testar Conexão
+                          </>
+                        )}
+                      </button>
+
+                      <button 
+                        onClick={handleOpenSelectKey}
+                        className="bg-white border-2 border-psf-blue text-psf-blue hover:bg-psf-blue/5 px-4 py-3 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all shadow-md active:scale-95 flex items-center gap-2"
+                      >
+                        <Key size={14} />
+                        Configurar Chave
+                      </button>
+                    </div>
+
+                    {testResult && (
+                      <motion.div 
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className={`p-3 rounded-xl border-2 text-[10px] font-bold ${
+                          testStatus === 'success' ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-rose-50 border-rose-100 text-rose-700'
+                        }`}
+                      >
+                        {testResult}
+                      </motion.div>
+                    )}
+                  </div>
+                </section>
+
                 <section className="space-y-4">
                   <div className="flex items-center gap-2">
                     <div className="w-1.5 h-4 bg-psf-blue rounded-full" />
@@ -1458,7 +1636,7 @@ export default function App() {
                       <li><strong>Matriz SWOT:</strong> Análise de Forças, Fraquezas, Oportunidades e Ameaças para cada equipe.</li>
                       <li><strong>Plano de Ação (30 Dias):</strong> Roteiro prático semanal para melhorar o acompanhamento de vulneráveis.</li>
                       <li><strong>Análise Comparativa:</strong> Selecione até 3 equipes para identificar gargalos e melhores práticas entre elas.</li>
-                      <li><strong>Chat Mentor:</strong> Converse diretamente com a IA para tirar dúvidas sobre a Nota Técnica 30/2025.</li>
+                      <li><strong>Chat Mentor:</strong> Converse diretamente com a IA para tirar dúvidas sobre a Nota Técnica 30/2025 e a Portaria 3.493/2024.</li>
                     </ul>
                   </div>
                 </section>
