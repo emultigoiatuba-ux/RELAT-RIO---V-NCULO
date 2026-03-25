@@ -1536,6 +1536,18 @@ export default function App() {
                   </p>
                   
                   <div className="flex flex-col gap-3 pt-2">
+                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl mb-2">
+                      <div className="flex items-start gap-3">
+                        <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+                        <div>
+                          <p className="text-[11px] font-bold text-amber-900 leading-tight">DICA DE ACESSO</p>
+                          <p className="text-[10px] text-amber-800 leading-relaxed mt-1">
+                            Se o teste de conexão falhar, você pode utilizar a <strong>Biblioteca Técnica</strong> abaixo para consultar as diretrizes e preencher seus planos manualmente.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="flex gap-2">
                       <button 
                         onClick={testAIConnection}
@@ -1580,6 +1592,77 @@ export default function App() {
                         {testResult}
                       </motion.div>
                     )}
+                  </div>
+
+                  {/* Biblioteca Técnica Section */}
+                  <div className="mt-8 pt-8 border-t border-slate-100">
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="p-2 bg-psf-blue/10 rounded-xl">
+                        <Library className="w-5 h-5 text-psf-blue" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">Biblioteca de Referência Estratégica</h4>
+                        <p className="text-[10px] text-slate-500 font-medium">Documentos oficiais e guias de apoio à gestão</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <a 
+                        href="https://www.in.gov.br/en/web/dou/-/portaria-gm/ms-n-3.493-de-10-de-abril-de-2024-553535921" 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="group p-4 bg-white border border-slate-200 rounded-2xl hover:border-psf-blue hover:shadow-md transition-all"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="p-2 bg-slate-50 rounded-lg group-hover:bg-psf-blue/10 transition-colors">
+                            <FileText className="w-4 h-4 text-slate-400 group-hover:text-psf-blue" />
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold text-slate-900 group-hover:text-psf-blue transition-colors">Portaria GM/MS Nº 3.493/2024</p>
+                            <p className="text-[9px] text-slate-500 mt-1 leading-tight">Nova metodologia de financiamento e custeio da APS.</p>
+                          </div>
+                        </div>
+                      </a>
+
+                      <div className="p-4 bg-white border border-slate-200 rounded-2xl">
+                        <div className="flex items-start gap-3">
+                          <div className="p-2 bg-slate-50 rounded-lg">
+                            <BookOpen className="w-4 h-4 text-slate-400" />
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold text-slate-900">Nota Técnica 30/2025</p>
+                            <p className="text-[9px] text-slate-500 mt-1 leading-tight">Diretrizes para o cálculo do CVAT e metas de acompanhamento.</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-6 p-5 bg-slate-900 rounded-3xl text-white">
+                      <h5 className="text-[10px] font-black uppercase tracking-widest mb-4 flex items-center gap-2">
+                        <Zap size={12} className="text-psf-yellow" />
+                        Guia Rápido: Foco no CVAT
+                      </h5>
+                      <div className="space-y-3">
+                        <div className="flex gap-3">
+                          <div className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[10px] font-bold shrink-0">1</div>
+                          <p className="text-[10px] text-slate-300 leading-relaxed">
+                            <strong className="text-white">Acompanhamento (70%):</strong> O foco deve ser em Idosos, Crianças e Beneficiários de Programas Sociais.
+                          </p>
+                        </div>
+                        <div className="flex gap-3">
+                          <div className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[10px] font-bold shrink-0">2</div>
+                          <p className="text-[10px] text-slate-300 leading-relaxed">
+                            <strong className="text-white">Vínculo Territorial:</strong> Equipes com mais de 3.000 pessoas cadastradas perdem pontos por "diluição de cuidado".
+                          </p>
+                        </div>
+                        <div className="flex gap-3">
+                          <div className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[10px] font-bold shrink-0">3</div>
+                          <p className="text-[10px] text-slate-300 leading-relaxed">
+                            <strong className="text-white">Ação Imediata:</strong> Realize busca ativa nas microáreas com menor produção registrada no e-SUS.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </section>
 
