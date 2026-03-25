@@ -167,7 +167,11 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const getAI = () => {
-    return new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error('Chave API do Gemini não configurada. Verifique as configurações do ambiente.');
+    }
+    return new GoogleGenAI({ apiKey });
   };
 
   useEffect(() => {
@@ -399,7 +403,12 @@ export default function App() {
     try {
       const ai = getAI();
       const teamData = data.find(t => t['NOME DA EQUIPE'] === selectedTeam);
-      const totalCadastro = Number(teamData?.['Total Cadastro'] || 0);
+      
+      if (!teamData) {
+        throw new Error('Dados da equipe não encontrados.');
+      }
+
+      const totalCadastro = Number(teamData['Total Cadastro'] || 0);
       const minParam = Number(teamData?.['Limite Normativo'] || 0);
       const maxParam = Number(teamData?.['Limite Máximo'] || 0);
       const needsRetirar = totalCadastro > maxParam;
@@ -425,7 +434,7 @@ export default function App() {
       Ao final, dê 3 dicas práticas de gestão especificamente para elevar a nota de acompanhamento desses grupos vulneráveis.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-3.1-pro-preview",
         contents: prompt,
         config: { systemInstruction: SYSTEM_INSTRUCTION }
       });
@@ -433,7 +442,7 @@ export default function App() {
       setSwotAnalysis(response.text || 'Não foi possível gerar a análise.');
     } catch (err: any) {
       console.error(err);
-      setSwotAnalysis('Erro ao gerar análise. Tente novamente.');
+      setSwotAnalysis(`Erro ao gerar análise: ${err.message || 'Tente novamente.'}`);
     } finally {
       setAnalyzing(false);
     }
@@ -464,7 +473,7 @@ export default function App() {
       Seja prático, use linguagem técnica da APS e cite a Nota Técnica 30/2025.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-3.1-pro-preview",
         contents: prompt,
         config: { systemInstruction: SYSTEM_INSTRUCTION }
       });
@@ -472,7 +481,7 @@ export default function App() {
       setActionPlan(response.text || 'Não foi possível gerar o plano de ação.');
     } catch (err: any) {
       console.error(err);
-      setActionPlan('Erro ao gerar plano de ação. Tente novamente.');
+      setActionPlan(`Erro ao gerar plano de ação: ${err.message || 'Tente novamente.'}`);
     } finally {
       setPlanning(false);
     }
@@ -510,7 +519,7 @@ export default function App() {
       4. Forneça 3 recomendações específicas para elevar o nível do grupo como um todo.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-3.1-flash-latest",
         contents: prompt,
         config: { systemInstruction: SYSTEM_INSTRUCTION }
       });
@@ -518,7 +527,7 @@ export default function App() {
       setComparativeAnalysis(response.text || 'Não foi possível gerar a análise comparativa.');
     } catch (err: any) {
       console.error(err);
-      setComparativeAnalysis('Erro ao gerar análise comparativa. Tente novamente.');
+      setComparativeAnalysis(`Erro ao gerar análise comparativa: ${err.message || 'Tente novamente.'}`);
     } finally {
       setComparing(false);
     }
@@ -541,7 +550,7 @@ export default function App() {
         : '';
       
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-3.1-flash-latest",
         contents: `${context}\n\nPergunta do usuário: ${messageText}`,
         config: { systemInstruction: SYSTEM_INSTRUCTION }
       });
